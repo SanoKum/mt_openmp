@@ -1,0 +1,37 @@
+# Ignore upstream repository copy
+/multall-open/
+
+# Built binaries
+/original/bin/
+/dev/bin/
+*.x
+
+# Build artifacts
+*.o
+*.obj
+*.mod
+*.a
+*.so
+*.dll
+*.dylib
+*.exe
+
+# Fortran temporary files
+*.lst
+*.map
+*.bak
+*.tmp
+
+# Runtime outputs
+flow_out
+grid_out
+global.plt
+results.out
+stage.log
+stopit
+initial_inverse.in
+final_inverse.in
+
+# Logs and misc
+*.log
+*.plt
