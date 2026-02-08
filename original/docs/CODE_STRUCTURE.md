@@ -193,6 +193,96 @@
 
 ---
 
+## ⏱️ Wall time 計測（2026-02-08）
+
+### 計測方法
+- `SYSTEM_CLOCK` による wall time で計測
+- `## 実行フロー` の主要処理ごとに `TIMER_START/STOP` を挿入
+- `TSTEP` 内の細分処理も計測
+- 計測結果は `stage.log` 末尾の `WALL TIME SUMMARY (s)` に出力
+
+### 実行条件
+- 実行場所: original/test_cases
+- 入力: two-stg-LP-ST+steam.dat
+- 最大ステップ: 100
+- コンパイル: gfortran (`-O2 -std=legacy -ffixed-line-length-none -mcmodel=large`)
+
+### 計測結果（wall time, s）
+
+#### 大枠（1,2,3,4,41）
+
+| ID | 処理 | 時間 (s) |
+|---:|---|---:|
+| 1 | MAIN: NEW_READIN | 0.014 |
+| 2 | MAIN: OLD_READIN | 0.000 |
+| 3 | MAIN: SETUP | 16.910 |
+| 4 | LOOP: TOTAL | 59.991 |
+| 41 | MAIN: TOTAL WALL TIME | 76.915 |
+
+#### 細分化（5〜40,48〜52）
+
+| ID | 処理 | 時間 (s) | 行範囲 |
+|---:|---|---:|---|
+| 9 | LOOP: PRESSURE/TEMP | 11.592 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4241-L4330) |
+| 29 | TSTEP: SMOOTH_VAR | 11.340 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L6888-L6890) |
+| 26 | TSTEP: STEP/DAMP | 7.369 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L6674-L6766) |
+| 40 | LOOP: MOMENTUM FLUX BUILD | 5.675 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5760-L5849) / [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5859-L5943) / [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5952-L6056) |
+| 19 | TSTEP: MOMENTUM-R | 5.601 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L6057-L6059) |
+| 16 | TSTEP: ENERGY | 5.577 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5244-L5246) |
+| 17 | TSTEP: MOMENTUM-X | 5.563 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5850-L5852) |
+| 14 | TSTEP: DENSITY | 5.559 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5016-L5023) |
+| 18 | TSTEP: MOMENTUM-T | 5.553 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5944-L5946) |
+| 28 | TSTEP: CELL->NODE | 4.148 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L6865-L6882) |
+| 10 | LOOP: VISCOUS/TURB MODEL | 4.029 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4337-L4355) |
+| 23 | TSTEP: DELTA/STORE | 3.031 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L6580-L6593) |
+| 11 | LOOP: MASS FLUX | 1.886 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4366-L4412) |
+| 25 | TSTEP: MG AGG | 1.662 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L6639-L6666) |
+| 39 | LOOP: ENERGY FLUX/SOURCE | 1.334 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5132-L5243) |
+| 8 | LOOP: VELOCITY UPDATE | 0.776 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4193-L4205) |
+| 33 | LOOP: MASS FLUX RFLUX | 0.518 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4889-L4908) |
+| 30 | TSTEP: FINAL AVG | 0.179 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L6900-L6971) |
+| 48 | LOOP: VRMS/VMAX (E5) | 0.110 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4219-L4246) |
+| 22 | TSTEP: FEXTRAP | 0.054 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L6533-L6575) |
+| 51 | LOOP: NO-INV SURF ZERO | 0.038 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4850-L4867) |
+| 31 | TSTEP: PITCH AVG POST-MG | 0.025 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L6820-L6855) |
+| 24 | TSTEP: PITCH AVG | 0.024 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L6601-L6633) |
+| 13 | LOOP: BOUNDARY/LEAK/COOL | 0.023 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5256-L5687) |
+| 20 | TSTEP: MG INIT | 0.020 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L6498-L6513) |
+| 35 | LOOP: ZERO MASS HUB/CASING | 0.007 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4934-L4943) |
+| 21 | TSTEP: TIP GAP | 0.001 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L6517-L6527) |
+| 5 | LOOP: COOL/BLEED INIT | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L3874-L3891) |
+| 6 | LOOP: INVERSE INPUT | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L3905-L4089) |
+| 7 | LOOP: SMOOTH/DAMP | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4151-L4186) |
+| 12 | LOOP: INVERSE FORCE/GEOM | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4593-L4844) |
+| 15 | TSTEP: SA VISC | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5106-L5108) |
+| 27 | TSTEP: SA SPECIAL | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L6769-L6806) |
+| 32 | LOOP: SA FLUX SETUP | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5049-L5105) / [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5109-L5125) |
+| 34 | LOOP: Q3D BODY FORCE | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4913-L4928) |
+| 36 | LOOP: BLEED HUB/CASING | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4951-L4962) |
+| 37 | LOOP: COOLANT MASS FLUX | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4968-L4979) / [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4988-L4999) |
+| 38 | LOOP: SHROUD MASS FLUX | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5006-L5009) |
+| 49 | LOOP: TFLOW ADDITION | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4413-L4520) |
+| 50 | LOOP: INV START/END OUT | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4525-L4592) |
+| 52 | LOOP: BLEED SURF FLUX | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L4874-L4886) |
+| 53 | LOOP: CELL AVG DENSITY | 0.000 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L5049-L5059) |
+
+#### SMOOTH_VAR 内訳（42,44,45,46,47）
+
+| ID | 処理 | 時間 (s) | 行範囲 |
+|---:|---|---:|---|
+| 46 | SMOOTH_VAR: PITCH/SPANWISE | 7.885 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L17157-L17242) |
+| 42 | SMOOTH_VAR: STREAMWISE CORE | 2.413 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L17057-L17100) |
+| 45 | SMOOTH_VAR: RESET D | 1.001 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L17132-L17142) |
+| 47 | SMOOTH_VAR: EXIT FLOW | 0.029 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L17256-L17288) |
+| 44 | SMOOTH_VAR: LEADING EDGE | 0.010 | [../src/multall-open-21.3.f](../src/multall-open-21.3.f#L17109-L17128) |
+
+### 所見（ボトルネック候補）
+- `TSTEP: SMOOTH_VAR` と `TSTEP: STEP/DAMP` が支配的
+- 次点で `LOOP: PRESSURE/TEMP` と各 `TSTEP: MOMENTUM-*` が重い
+- 今後の OpenMP は `SMOOTH_VAR`/`TSTEP` 内ループから着手が効果的
+
+---
+
 ## ✅ 変更履歴
 
 - 旧 `CODE_STRUCTURE.md` を廃止し、本ファイルへ統合
