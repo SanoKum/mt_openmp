@@ -51,3 +51,50 @@
   - 2スレッド（バインド無し）: MAIN TOTAL 74.690 s、`SMOOTH_VAR` 11.778 s。
   - 2スレッド（OMP_PLACES=cores, OMP_PROC_BIND=close）: MAIN TOTAL 73.925 s、`SMOOTH_VAR` 11.502 s。
 - 結論: 速度向上は確認できず、全体/`SMOOTH_VAR` ともに**改善がほぼ出ない、または悪化**したため「今回の修正はうまくいかなかった」と判断。
+
+## 9) ベクトル化の検証（2026-02-10）
+対象: [../src/multall-open21.3-s1.0.f](../src/multall-open21.3-s1.0.f#L17078-L17373)
+
+### 9.1 Streamwise smoothing (core + boundary)
+範囲: [SMOOTH_VAR: STREAMWISE CORE](../src/multall-open21.3-s1.0.f#L17102-L17157)
+- ループ本体(3900): `STORE(I,J,K)` へ書き出し、`D` を読み取りのみ。I 方向に独立で依存なし。
+- SIMD可否: **可**。`I` を最内ループに保持したまま `!$OMP SIMD` などで明示すると効果が出やすい。
+- 注意: `collapse(3)` は I 方向の連続アクセスを崩す可能性があるため、SIMD目的なら I を最内に固定した方がよい。
+- 境界補正(3905/3910): いずれも `STORE` 更新のみで依存なし。I 方向 SIMDは可だが処理量は小さい。
+
+### 9.2 Leading edge smoothing
+範囲: [SMOOTH_VAR: LEADING EDGE](../src/multall-open21.3-s1.0.f#L17166-L17193)
+- `I=1,IM` のみ更新。ベクトル化しても実効が小さい。
+- SIMD可否: **実用上は効果薄** (処理点が少ない)。
+
+### 9.3 Reset D (STORE -> D)
+範囲: [SMOOTH_VAR: RESET D](../src/multall-open21.3-s1.0.f#L17197-L17211)
+- 単純なコピーで依存なし。
+- SIMD可否: **可**。I 方向にベクトル化しやすいがメモリ帯域支配。
+
+### 9.4 Pitchwise smoothing
+範囲: [SMOOTH_VAR: PITCH/SPANWISE](../src/multall-open21.3-s1.0.f#L17226-L17319)
+- ループ(9110/9120/9130): `AVG/CURVE/SCURVE` を使った計算で I 方向に依存なし。
+- SIMD可否: **可**。I 方向の SIMD 付与が最も素直。
+- 注意: `IND/INDLE` 分岐はループ外にあり、SIMD阻害は限定的。
+
+### 9.5 Spanwise smoothing
+範囲: [SMOOTH_VAR: PITCH/SPANWISE](../src/multall-open21.3-s1.0.f#L17226-L17319)
+- ループ(9200/9210/9230): 依存はなく SIMD は論理的に可能。
+- ただし `K` 方向はメモリが大きくストライドし、SIMD効率は低下しやすい。
+- SIMD可否: **可(効果は限定的)**。I 方向の並列が主、SIMD は補助的。
+
+### 9.6 Corner smoothing
+範囲: [SMOOTH_VAR: PITCH/SPANWISE](../src/multall-open21.3-s1.0.f#L17226-L17319)
+- 4点のみ更新。SIMDの意味なし。
+
+### 9.7 Exit flow smoothing
+範囲: [SMOOTH_VAR: EXIT FLOW](../src/multall-open21.3-s1.0.f#L17333-L17373)
+- I 方向スムージング(8501): `D(I,J,K)` を **同一配列へ逐次更新**し、`D(I-1,J,K)` を参照するため **ループキャリー依存**あり。
+- K 方向スムージング(8601)も同様に `D(I,J,K-1)` を参照し依存が発生。
+- SIMD可否: **不可(現状)**。SIMD 化するには `D` を一時配列に退避してから書き戻す2段階化が必要。
+
+### 9.8 まとめ
+- SIMD 有望: streamwise core、reset D、pitchwise smoothing。
+- SIMD 効果が薄い: leading edge、corner smoothing、spanwise smoothing(ストライド大)。
+- SIMD 不可: exit flow smoothing(インプレース更新による依存)。
