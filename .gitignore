@@ -35,3 +35,4 @@ final_inverse.in
 # Logs and misc
 *.log
 *.plt
+run_*.out
