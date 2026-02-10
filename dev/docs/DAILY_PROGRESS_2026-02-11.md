@@ -424,3 +424,167 @@ convergence は前回（gather3）と完全一致（浮動小数点丸め程度�
 
 1. **Region 2 + Region 3 統合の検討**: DO 1500〜DAMP (Region 2) と SMOOTH_VAR (Region 3) の間にある逐次コード（PITCH AVG POST-MG, CELL->NODE, SA SPECIAL）の取り扱いを分析。
 2. **CELL->NODE gather の並列化**: interior loop に `C$OMP DO` を追加。
+
+---
+
+## 次セッションへの引き継ぎ: Region 2 + Region 3 統合
+
+### 目標
+
+TSTEP の Region 2 (L6727-6825) と Region 3 (L7067-7069) を 1 つの PARALLEL 領域に統合し、fork/join を 3→2 に削減（500回の fork/join を削減）。同時に CELL->NODE gather interior ループを `C$OMP DO` で並列化する。
+
+### 現在の TSTEP 構造（Region 2 以降のフロー）
+
+```
+L6727  C$OMP PARALLEL         ← Region 2 開始（fork #2）
+L6738    C$OMP DO: DO 1500 (STEP)
+L6758    C$OMP SINGLE: SMOOTH_RESID 呼び出し
+L6779    C$OMP DO REDUCTION: DO 1502 (AVG_CHG)
+L6786-6807 C$OMP SINGLE: AVG_CHG → DAMP 計算
+L6810    C$OMP DO: DO 1525 (DAMP 適用)
+L6825  C$OMP END PARALLEL     ← Region 2 終了（join #2）
+L6832  TIMER_STOP
+       --- 逐次区間 ---
+L6833  IF(NCALL.EQ.2): SA SPECIAL
+         DO 1600 (D += STORE, セル中心更新)
+         mixing plane 平均転送
+         SMOOTH_RESID(D, SFTVIS, NSMTH)
+         GO TO 8700            ← CELL->NODE, SMOOTH_VAR をスキップ
+       END IF
+L6889  PITCH AVG POST-MG (DO 1850)    ← ~0.008s
+L6937  CELL->NODE gather               ← ~2.0s (serial, 並列化候補)
+         Phase 1: interior (I=2..IMM1, J=2..JM-1, K=2..KMM1) ← C$OMP DO 対象
+         Phase 2: boundary 面ループ (K面, I面, J面)            ← C$OMP SINGLE
+L7063  TIMER calls
+L7067  C$OMP PARALLEL SHARED(D) ← Region 3 開始（fork #3）
+L7068    CALL SMOOTH_VAR(D)     ← orphaned worksharing
+L7069  C$OMP END PARALLEL       ← Region 3 終了（join #3）
+L7075  8700 CONTINUE            ← SA SPECIAL の GO TO 先、FINAL 区間開始
+```
+
+### 統合プラン
+
+#### Step 1: SA SPECIAL の GO TO 8700 を IF-ELSE に変換
+
+現状:
+```fortran
+      IF(NCALL.EQ.2) THEN
+        ... SA SPECIAL ...
+        GO TO 8700
+      END IF
+      ... PITCH AVG POST-MG ...
+      ... CELL->NODE ...
+      ... SMOOTH_VAR ...
+ 8700 CONTINUE
+      ... FINAL ...
+```
+
+変換後:
+```fortran
+      IF(NCALL.EQ.2) THEN
+        ... SA SPECIAL ...
+      ELSE
+        ... PITCH AVG POST-MG ...
+        ... CELL->NODE ...
+        ... SMOOTH_VAR ...
+      END IF
+ 8700 CONTINUE
+      ... FINAL ...
+```
+
+SA SPECIAL のタイマーは 0.00s（テストケースで SA モデル不使用）なのでリスクは実質ゼロ。
+
+#### Step 2: Region 2 を拡張して CELL->NODE + SMOOTH_VAR を包含
+
+```fortran
+C$OMP PARALLEL DEFAULT(NONE) ...
+C$OMP DO: DO 1500 (STEP)
+C$OMP SINGLE: SMOOTH_RESID
+C$OMP DO REDUCTION: DO 1502
+C$OMP SINGLE: AVG_CHG → DAMP
+C$OMP DO: DO 1525 (DAMP)
+C$OMP SINGLE                    ← ここから新規追加
+      IF(NCALL.EQ.2) THEN
+        SA SPECIAL (逐次)
+      ELSE
+        PITCH AVG POST-MG (逐次, 0.008s)
+C$OMP END SINGLE
+C$OMP DO: CELL->NODE interior   ← gather Phase 1 の並列化
+C$OMP SINGLE: CELL->NODE boundary ← Phase 2 は逐次でOK
+        CALL SMOOTH_VAR(D)       ← orphaned worksharing（SINGLE 不要）
+      END IF
+C$OMP END PARALLEL
+```
+
+**注意**: SMOOTH_VAR は orphaned `C$OMP DO` を内部に持つので `C$OMP SINGLE` で囲んではいけない。全スレッドが SMOOTH_VAR に入る必要がある。
+
+#### Step 3: SMOOTH_VAR の orphaned 呼び出しと IF-ELSE の整合
+
+NCALL==2 のとき SMOOTH_VAR を呼ばない。しかし全スレッドが同じ分岐を取る必要がある（OpenMP の構造化ブロック制約）。NCALL は SHARED 変数なので全スレッドで同一値、IF-ELSE の分岐は一致する。ただし ELSE 側のコード内に `C$OMP DO` があるため、THEN 側にも対応する worksharing が必要（または全体を SINGLE で囲む）。
+
+**最もシンプルな設計**:
+```fortran
+C$OMP SINGLE
+      IF(NCALL.EQ.2) THEN
+        ... SA SPECIAL 全体 ...
+      ELSE
+        ... PITCH AVG POST-MG ...
+      END IF
+C$OMP END SINGLE
+C     NCALL==2 のときはここに来るが CELL->NODE/SMOOTH_VAR はスキップ
+      IF(NCALL.NE.2) THEN
+C$OMP DO
+        CELL->NODE interior (並列)
+C$OMP END DO
+C       boundary (暗黙 BARRIER 後、全スレッドが入る)
+C$OMP SINGLE
+        CELL->NODE boundary (逐次)
+C$OMP END SINGLE
+        CALL SMOOTH_VAR(D)  ← orphaned、全スレッド参加
+      END IF
+C$OMP END PARALLEL
+```
+
+### gfortran PARALLEL 内劣化リスクの分析
+
+Session 4 で判明: gfortran は PARALLEL 領域内の逐次コード（SINGLE/MASTER）を劣化させる。
+
+統合後に SINGLE 内に入るコード:
+- SMOOTH_RESID: 既に Region 2 内で SINGLE（変更なし）
+- SA SPECIAL: NCALL==2 のみ、テストケースで不使用（0.00s）
+- PITCH AVG POST-MG: 0.008s → 劣化しても無視可
+- CELL->NODE boundary: ~0.1s 程度（interior 1.95s の大部分は並列化される）
+
+**MG AGG (1.6s) は Region 2 の前にある（Region 1 と 2 の間の逐次区間）ため影響なし。**
+
+### 期待される効果
+
+- fork/join 削減: 3回/call → 2回/call（500 回の fork/join 削減）
+- CELL->NODE interior 並列化: 2.0s → ~1.0s（OMP=2 で）
+- 合計: OMP=2 で 1.5〜2.0s の改善を期待
+
+### 現在の性能ベースライン
+
+| 指標 | original | OMP=1 current | OMP=2 current |
+|---|---|---|---|
+| MAIN TOTAL | 59.35s | 60.65s | **49.64s** |
+| LOOP TOTAL | 43.01s | 44.97s | **33.93s** |
+| CELL->NODE | 3.45s | 1.96s | 2.00s |
+| SMOOTH_VAR | 7.65s | 7.47s | 4.37s |
+| STEP/DAMP | — | 7.97s | 4.50s |
+
+### ファイル構成
+
+- ソース: `dev/src/multall-open21.3-s1.0.f`
+- オリジナル: `dev/src/multall-open-21.3.f`（変更禁止）
+- COMMON: `dev/src/commall-open-21.3`
+- テスト: `dev/test_cases/two-stg-LP-ST+steam.dat`
+- 最新コミット: **cd3acc2**（SMOOTH_VAR orphaned）
+- 前コミット: **1a28ec9**（gather 変換）
+
+### 重要な発見事項（過去セッションの学び）
+
+1. **gfortran は PARALLEL 領域内の逐次コードを劣化させる** — MG AGG が 1.5→3.9s。SINGLE でも MASTER でも同じ。コンパイラ最適化レベルの問題。
+2. **orphaned worksharing はこの問題を回避できる** — SMOOTH_VAR 内の `C$OMP DO` は別翻訳単位として最適化される。
+3. **ATOMIC は小配列への高頻度衝突で壊滅的** — DO 1100 scatter で 22 倍遅化。
+4. **scatter→gather + interior/boundary 分離で scatter より 40% 高速** — IF 排除がキー。
