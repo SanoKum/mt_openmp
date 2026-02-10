@@ -246,3 +246,181 @@ C     ... SMOOTH_VAR(D): 内部に独自PARALLEL ...
 scatter（セル→ノード分配）を gather（ノード←周囲セル集約）に変換すれば、
 `D(I,J,K)` の書き込みが各ノードで独立し、ATOMIC 不要で完全並列化可能。
 ただし境界条件の IF 分岐が多くなるデメリットあり。
+
+---
+
+## セッション 4: fork/join 削減 + CELL->NODE gather 変換
+
+### 目標
+
+TSTEP 内の PARALLEL fork/join オーバーヘッド（OMP=1 で +6.7s）を削減し、
+DO 1100 (CELL->NODE) を並列化可能な gather パターンに変換する。
+
+### 実施内容
+
+#### 1. 2-region PARALLEL への統合（前回からの引き継ぎ）
+
+Session 3 の 4×PARALLEL DO を 2 つの PARALLEL 領域に統合:
+- **Region 1**: DO 1000 (DELTA/STORE) — `C$OMP PARALLEL DO`
+- **Region 2**: DO 1500 + SMOOTH_RESID(SINGLE) + DO 1502(REDUCTION) + DO 1525(DAMP) — `C$OMP PARALLEL`
+
+| 構成 | fork/join 回数 | OMP=1 (s) | OMP=2 (s) |
+|---|---|---|---|
+| 4×PARALLEL DO | 4/call | 61.25 | 52.62 |
+| 2-region PARALLEL | 2/call | 60.89 | 52.35 |
+
+fork/join 半減で OMP=1 overhead が 7.05s → 6.69s に微改善（0.36s）。
+
+#### 2. 打ち手 1: 単一 PARALLEL + MASTER/BARRIER（失敗→revert）
+
+DO 1000 から DO 1525 まで単一の `C$OMP PARALLEL` で囲み、
+PITCH AVG / MG AGG / SMOOTH_RESID を `C$OMP MASTER` + `C$OMP BARRIER` で逐次実行する案。
+
+**結果: MG AGG が 1.5s → 3.87s**（2.5x 悪化）。
+
+**根本原因**: gfortran/libgomp では `C$OMP PARALLEL` 領域内のコードに対してコンパイラが保守的な最適化を行う（レジスタ割当て制限、ベクトル化抑制）。これは `SINGLE` でも `MASTER` でも同じ。ランタイムの fork/join コストではなく、**コンパイラの最適化レベル低下**が主因。
+
+→ **revert**。gfortran では PARALLEL 領域の統合による fork/join 削減は、
+逐次コードの最適化劣化に食われるため割に合わない。
+
+#### 3. 打ち手 2: DO 1100 scatter→gather 変換（成功）
+
+##### 試行 1: 全ノード IF 分岐 gather
+
+scatter（各セルが 8 隣接ノードに書き込み）→ gather（各ノードが 8 周囲セルから読み集め）に変換。
+各ノードで境界判定 IF が 8 個 → **6.37s**（scatter 3.26s の 2x 悪化）。
+
+##### 試行 2: interior + 全ノード skip ループ
+
+interior（I=2..IMM1, J=2..JM-1, K=2..KMM1）は IF なし、
+boundary は全ノードループで IF 判定 → **3.34s**（scatter と同等だが 93% のノードをスキップして無駄）。
+
+##### 試行 3: interior + 境界面ループ（最終版）
+
+boundary を 3 ペアの面ループで直接処理:
+- K 面: K=1, K=KM （各 IM×JM ノード）
+- I 面: I=1, I=IM （各 JM×(KM-2) ノード）
+- J 面: J=1, J=JM （各 (IM-2)×(KM-2) ノード）
+
+合計 ~111K 回（全ノード 1.84M の 6%）→ **CELL->NODE: 1.95s**（scatter 比 **40% 高速化**）
+
+| バージョン | CELL->NODE (s) | LOOP TOTAL (s) | MAIN TOTAL (s) |
+|---|---|---|---|
+| scatter（元） | 3.26 | 45.08 | 60.89 |
+| gather 全IF | 6.37 | 48.40 | 64.06 |
+| gather interior+skip | 3.34 | 44.85 | 60.63 |
+| **gather interior+面ループ** | **1.95** | **44.13** | **59.90** |
+
+**数値検証**: OMP=1 で convergence 全 100 ステップ完全一致。
+
+### 保存済みログファイル
+
+| ファイル | 内容 |
+|---|---|
+| `stage.log.omp1_2par` | 2-region PARALLEL OMP=1（60.89s） |
+| `stage.log.omp2_2par` | 2-region PARALLEL OMP=2（52.35s） |
+| `stage.log.omp1_master` | MASTER+BARRIER 版 OMP=1（64.98s、失敗） |
+| `stage.log.omp1_gather3` | gather 面ループ版 OMP=1（59.90s、最終版） |
+
+### コミット
+
+- **1a28ec9**: `TSTEP: DO 1100 scatter->gather transformation with boundary face optimization`
+
+### 学び
+
+- **gfortran は PARALLEL 領域内の逐次コードを大幅に劣化させる** — SINGLE でも MASTER でも同じ。コンパイラ最適化レベルの問題で、ランタイムオーバーヘッドだけでは説明できない。PARALLEL 領域の統合は gfortran では有効な戦略ではない。
+- **scatter→gather は内部/境界分離との組み合わせで scatter より高速** — interior ループの IF 排除がキー（ベクトル化・パイプライン効率向上）。
+- **境界面ループの直接化で 93% のイテレーション削減** — 全ノードスキャンの IF スキップから、面ノードのみの直接ループへ。
+
+### 次のアクション
+
+1. **SMOOTH_VAR orphaned 化**: 内部の `C$OMP PARALLEL` → `C$OMP DO`（orphaned worksharing）に変換。TSTEP の PARALLEL 領域内から呼べるようにする。
+2. **gather + SMOOTH_VAR を Region 2 に統合**: DO 1100 gather に `C$OMP DO` を追加し、SMOOTH_VAR を orphaned 化した上で、Region 2 内で一貫して実行。
+3. **OMP=2 テスト**: gather 変換後の 2 並列ベンチマーク。
+
+---
+
+## セッション 4 (続き): SMOOTH_VAR orphaned 化
+
+### 目標
+
+SMOOTH_VAR 内の 8 個の `C$OMP PARALLEL` を orphaned `C$OMP DO` に変換し、
+TSTEP 側の単一 PARALLEL 領域から呼ぶことで fork/join を 4000回→500回に削減。
+
+### 実施内容
+
+#### SMOOTH_VAR orphaned 変換
+
+全 8 個の `C$OMP PARALLEL` ... `C$OMP END PARALLEL` を除去し、内部の `C$OMP DO` を orphaned worksharing に変換:
+
+| 領域 | 元の PARALLEL | 変換後 |
+|---|---|---|
+| STREAMWISE core | 2 | orphaned `C$OMP DO` × 3 |
+| LEADING EDGE | 2 | orphaned `C$OMP DO` × 2 |
+| RESET D | 1 | orphaned `C$OMP DO` × 1 |
+| PITCH/SPANWISE | 1 (PARALLEL DO) | orphaned `C$OMP DO` × 1 |
+| EXIT FLOW | 2 | orphaned `C$OMP DO` × 2 |
+
+スレッドローカル配列:
+- `AVG_T(ID,MAXT)` → `AVG_T(ID)`（スタック自動変数）
+- 同様に `CURVE_T`, `SCURVE_T`, `AVGK_T`, `CURVEK_T`, `SCURVEK_T`
+- Fortran の orphaned 呼び出し: 各スレッドが独自のスタックフレームを持つため、PRIVATE 指定不要
+
+`TIMER_START` / `TIMER_STOP` は `C$OMP MASTER` で囲んでスレッドセーフ化。
+
+#### TSTEP への PARALLEL wrapper 追加
+
+```fortran
+C$OMP PARALLEL DEFAULT(NONE) SHARED(D)
+      CALL SMOOTH_VAR(D)
+C$OMP END PARALLEL
+```
+
+### 結果
+
+#### OMP=1（数値検証）
+
+convergence は前回（gather3）と完全一致（浮動小数点丸め程度の差のみ）。
+
+| 指標 | gather3 (前) | orphan | diff |
+|---|---|---|---|
+| SMOOTH_VAR | 7.17s | 7.47s | +0.30s（ノイズ範囲） |
+| MAIN TOTAL | 59.90s | 60.65s | +0.75s（ノイズ範囲） |
+
+#### OMP=2（性能比較）
+
+| 指標 | omp2_2par (前) | omp2_orphan | 改善 |
+|---|---|---|---|
+| SMOOTH_VAR | 5.19s | **4.37s** | **-0.82s (-15.8%)** |
+|  └ PITCH/SPAN | 3.56s | 2.81s | -0.75s |
+| CELL->NODE | 3.41s | **2.00s** | **-1.41s**（gather効果） |
+| LOOP TOTAL | 36.36s | **33.93s** | **-2.43s** |
+| **MAIN TOTAL** | **52.35s** | **49.64s** | **-2.71s (-5.2%)** |
+
+#### original からの総合改善
+
+| 指標 | original | OMP=2 orphan | 改善率 |
+|---|---|---|---|
+| MAIN TOTAL | 59.35s | **49.64s** | **-16.4%** |
+| LOOP TOTAL | 43.01s | **33.93s** | **-21.1%** |
+| OMP=1 overhead | — | +1.30s (+2.2%) | — |
+
+### 保存済みログファイル
+
+| ファイル | 内容 |
+|---|---|
+| `stage.log.omp1_orphan` | orphaned 版 OMP=1（60.65s） |
+
+### コミット
+
+- **cd3acc2**: `SMOOTH_VAR: orphaned worksharing conversion`
+
+### 学び
+
+- **orphaned worksharing は gfortran でも有効** — PARALLEL 領域内の逐次コード劣化問題は、orphaned ルーチン内の `C$OMP DO` には影響しない（コンパイラが別の翻訳単位として最適化する）。
+- **スタック自動変数はスレッドセーフ** — Fortran の自動配列は各スレッドのスタック上に確保されるため、MAXT 次元の手動スレッドインデックスが不要に。
+
+### 次のアクション
+
+1. **Region 2 + Region 3 統合の検討**: DO 1500〜DAMP (Region 2) と SMOOTH_VAR (Region 3) の間にある逐次コード（PITCH AVG POST-MG, CELL->NODE, SA SPECIAL）の取り扱いを分析。
+2. **CELL->NODE gather の並列化**: interior loop に `C$OMP DO` を追加。
