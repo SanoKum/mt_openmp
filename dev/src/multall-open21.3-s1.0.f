@@ -6631,6 +6631,11 @@ C*******************************************************************************
 C      SUM THE FLUXES TO FORM CHANGE AND SAVE IT IN STORE(I,J,K) 
 C
       CALL TIMER_START(T_TSTEP_DELTA)
+C
+C---- PARALLEL region 1: DO 1000 (DELTA/STORE) ----
+C     fork/join reduced: 4 per call -> 2 per call (split)
+C     DO 700, DO 1100 remain sequential (scatter pattern)
+C
 C$OMP PARALLEL DO DEFAULT(NONE) COLLAPSE(3)
 C$OMP&PRIVATE(I,J,K,RATPITCH,DELTA)
 C$OMP&SHARED(XFLUX,TFLUX,RFLUX,SOURCE,STORE,DIFF,
@@ -6651,11 +6656,9 @@ C$OMP END PARALLEL DO
 
       CALL TIMER_STOP(T_TSTEP_DELTA)
 C
-C**********************************************************************************
-C**********************************************************************************
 C     PITCHWISE AVERAGE THE CHANGES AT ANY MIXING PLANES
-C     THIS IS ONLY DONE ON THE DOWNSTREAM FACE OF THE MIXING PLANE UNLESS FEXTRAP = 0
-C     IN WHICH CASE IT IS DONE ON BOTH SIDES AS IN TBLOCK-13.
+C     THIS IS ONLY DONE ON THE DOWNSTREAM FACE OF THE MIXING
+C     PLANE UNLESS FEXTRAP = 0 (BOTH SIDES AS IN TBLOCK-13).
 C
       CALL TIMER_START(T_TSTEP_PITCH)
       DO 1750 NR = 1,NRWSM1
@@ -6691,18 +6694,12 @@ C
 
       CALL TIMER_STOP(T_TSTEP_PITCH)
 C
-C*******************************************************************************
-C*******************************************************************************
-C    JUMP TO 1020  IF NO MULTIGRID. THIS IS VERY UNUSUAL.
-C
+C     MG AGG: scatter to coarse grid (sequential)
       CALL TIMER_START(T_TSTEP_MG)
-      IF(IR.LE.1.AND.JR.LE.1.AND.KR.LE.1) GO TO 1020
+      IF(.NOT.(IR.LE.1.AND.JR.LE.1.AND.KR.LE.1)) THEN
 C
-C*******************************************************************************
-C*******************************************************************************
-C      SUM THE ELEMENT CHANGES TO FORM THE CHANGES FOR THE MULTIGRID
-C      BLOCKS. STORE(I,J,K) IS NOW USED AS A STORE FOR THE CHANGE IN
-C      THE ELEMENTS.
+C      SUM THE ELEMENT CHANGES TO FORM THE CHANGES FOR THE
+C      MULTIGRID BLOCKS.
 C
       DO 700 K=1,KMM1
       K1 = KB1(K)
@@ -6719,24 +6716,26 @@ C
       B2CHG(I2,J2,K2) = B2CHG(I2,J2,K2) + DELTA
       SBCHG(JSB)      = SBCHG(JSB)      + DELTA
   700 CONTINUE
+      END IF
 C
- 1020 CONTINUE
-
       CALL TIMER_STOP(T_TSTEP_MG)
-C
-C*******************************************************************************
-C*******************************************************************************
-C     ADD THE BLOCK CHANGES TO THE ELEMENT CHANGES, MULTIPLY BY THE TIME STEP
-C     JDD REMOVED THE CALCULATION OF THE AVERAGE CHANGE FROM THIS APRIL 2018.
-C     IT IS NOW CALCULATED IN THE DO 1501 LOOP.
-C
       CALL TIMER_START(T_TSTEP_STEP)
-C$OMP PARALLEL DO DEFAULT(NONE) COLLAPSE(3)
-C$OMP&PRIVATE(I,J,K,I1,I2,J1,J2,K1,K2,JSB,DELTA)
+C
+C---- PARALLEL region 2: DO 1500 + DAMP ----
+C     Combines 3 former PARALLEL DO into 1 PARALLEL
+C
+C$OMP PARALLEL DEFAULT(NONE)
+C$OMP&PRIVATE(I,J,K,DELTA,I1,I2,J1,J2,K1,K2,
+C$OMP&JSB,NR,ABSCHG,FDAMP,JCHANGE)
 C$OMP&SHARED(STORE,STEP,RSTEP,B1CHG,B2CHG,SBCHG,
 C$OMP&STEP1,STEP2,STEPSBK,
-C$OMP&KB1,KB2,JB1,JB2,IB1,IB2,JSBLK,IMM1,JM,KMM1)
-C$OMP&SCHEDULE(STATIC)
+C$OMP&KB1,KB2,JB1,JB2,IB1,IB2,JSBLK,IMM1,JM,KMM1,
+C$OMP&NRSMTH,RSMTH,
+C$OMP&DAMP,NROWS,JSTART,JMIX,AVG_CHG,AVG_BLK,NROW,
+C$OMP&SUMCHG,JST,JEN,NSUM)
+C
+C---- DO 1500: STEP (element-independent) ----
+C$OMP DO COLLAPSE(3) SCHEDULE(STATIC)
       DO 1500 K=1,KMM1
       DO 1500 J=2,JM
       DO 1500 I=1,IMM1
@@ -6753,50 +6752,44 @@ C$OMP&SCHEDULE(STATIC)
      &      + SBCHG(JSB)*STEPSBK(JSB))*RSTEP(I,J,K)
       STORE(I,J,K) = DELTA
  1500 CONTINUE
-C$OMP END PARALLEL DO
+C$OMP END DO
 C
-c      END OF CALCULATING THE MULTIGRID CHANGES
-C*******************************************************************************
-C*******************************************************************************
-C    USE RESIDUAL SMOOTHING IF NRSMTH > 0
-C
+C---- Sequential: SMOOTH_RESID ----
+C$OMP SINGLE
       IF(NRSMTH.GT.0) THEN
       CALL SMOOTH_RESID(STORE,RSMTH,NRSMTH)
       END IF
+C$OMP END SINGLE
 C
-C   
-C*******************************************************************************
-C*******************************************************************************
+C     APPLY THE NEGATIVE FEEDBACK. SKIP IT IF DAMP IS SMALL
+C     OR LARGE.
 C
-C     APPLY THE NEGATIVE FEEDBACK. SKIP IT IF DAMP IS SMALL OR LARGE
+      IF(DAMP.GE.2.0.AND.DAMP.LE.100) THEN
 C
-      IF(DAMP.LT.2.0.OR.DAMP.GT.100) GO TO 1550
-C
-C     CHANGED BY JDD TO USE THE AVERAGE CHANGE PER ROW - AVG_BLK(NR)- 14/02/2018
-C     CALCULATE THE AVERAGE CHANGES FOR EACH ROW,  AVG_CHG(NR).
-C     THIS IS NEW BY JDD  14/02/2018.
+C     CALCULATE THE AVERAGE CHANGES FOR EACH ROW, AVG_CHG(NR).
 C
       DO 1501 NR = 1,NROWS
+C$OMP SINGLE
       SUMCHG = 0.0
-      JST = JSTART(NR) + 1 
+      JST = JSTART(NR) + 1
       JEN = JMIX(NR)   - 1
       JCHANGE = JEN - JST  + 1
       NSUM = IMM1*KMM1*JCHANGE
-C$OMP PARALLEL DO DEFAULT(NONE) COLLAPSE(3)
-C$OMP&PRIVATE(I,J,K)
-C$OMP&SHARED(STORE,KMM1,IMM1,JST,JEN)
-C$OMP&REDUCTION(+:SUMCHG) SCHEDULE(STATIC)
+C$OMP END SINGLE
+C$OMP DO COLLAPSE(3) REDUCTION(+:SUMCHG) SCHEDULE(STATIC)
       DO 1502 K=1,KMM1
       DO 1502 J = JST, JEN
       DO 1502 I=1,IMM1
       SUMCHG = SUMCHG + ABS(STORE(I,J,K))
  1502 CONTINUE
-C$OMP END PARALLEL DO
+C$OMP END DO
+C$OMP SINGLE
       AVG_CHG(NR) = SUMCHG/NSUM
+C$OMP END SINGLE
  1501 CONTINUE
 C
 C     SMOOTH THE BLADE ROW CHANGES
-C
+C$OMP SINGLE
       IF(NROWS.EQ.1) AVG_BLK(1) = AVG_CHG(1)
       IF(NROWS.EQ.2) THEN
             AVG_BLK(2) = 0.5*(AVG_CHG(1) + AVG_CHG(2))
@@ -6804,20 +6797,17 @@ C
       END IF
       IF(NROWS.GT.2) THEN
       DO 1503 NR = 2,NROWS-1
-      AVG_BLK(NR) = 0.25*(AVG_CHG(NR-1)+AVG_CHG(NR+1)) + 0.5*AVG_CHG(NR)
+      AVG_BLK(NR) = 0.25*(AVG_CHG(NR-1)+AVG_CHG(NR+1))
+     &            + 0.5*AVG_CHG(NR)
  1503 CONTINUE
-      AVG_BLK(NROWS) = 0.5*(AVG_CHG(NROWS-1) + AVG_CHG(NROWS))
-      AVG_BLK(1)     = 0.5*(AVG_CHG(1) + AVG_CHG(2)) 
-      END IF 
+      AVG_BLK(NROWS) = 0.5*(AVG_CHG(NROWS-1)
+     &              + AVG_CHG(NROWS))
+      AVG_BLK(1)     = 0.5*(AVG_CHG(1) + AVG_CHG(2))
+      END IF
+C$OMP END SINGLE
 C
-C*******************************************************************************
-C      APPLY THE NEGATIVE FEEDBACK TO LIMIT THE MAXIMUM CHANGE.
-C*******************************************************************************
-C
-C$OMP PARALLEL DO DEFAULT(NONE) COLLAPSE(3)
-C$OMP&PRIVATE(I,J,K,NR,DELTA,ABSCHG,FDAMP)
-C$OMP&SHARED(STORE,NROW,AVG_BLK,DAMP,IMM1,JM,KMM1)
-C$OMP&SCHEDULE(STATIC)
+C---- DO 1525: DAMP (element-independent) ----
+C$OMP DO COLLAPSE(3) SCHEDULE(STATIC)
       DO 1525 K=1,KMM1
       DO 1525 J=2,JM
       DO 1525 I=1,IMM1
@@ -6827,17 +6817,16 @@ C$OMP&SCHEDULE(STATIC)
       FDAMP  = ABSCHG/AVG_BLK(NR)
       STORE(I,J,K) = DELTA/(1. + FDAMP/DAMP )
  1525 CONTINUE
-C$OMP END PARALLEL DO
+C$OMP END DO
 C
-C   END OF JDD  14/02/2018  CHANGES.
-C*******************************************************************************
-C*******************************************************************************
+      END IF
 C
- 1550 CONTINUE
-C   END OF JDD 14/02/2018 CHANGES
+C---- End of PARALLEL region 2 ----
+C$OMP END PARALLEL
+C
 C*****************************************************************************
-C******************************************************************************
-C   NEXT IS SPECIAL TREATMENT FOR THE TURBULENT VISCOSITY IF USING THE SA MODEL
+C   NEXT IS SPECIAL TREATMENT FOR THE TURBULENT VISCOSITY
+C   IF USING THE SA MODEL
 C
       CALL TIMER_STOP(T_TSTEP_STEP)
 
@@ -6939,21 +6928,131 @@ C              THE FACTOR OF 1/8 IS INCLUDED IN THE 'FMI' TERMS.
 C****************************************************************************
 C
       CALL TIMER_START(T_TSTEP_CELLNODE)
-      DO 1100 K=1,KMM1
-      DO 1100 J=2,JM
-      DO 1100 I=1,IMM1
 C
-      ADD = STORE(I,J,K)
+C---- CELL->NODE: gather transformation ----
+C     Each node gathers contributions from surrounding cells.
+C     Thread-safe (no write conflicts) for parallelization.
 C
-      D(I,J,K)      =  D(I,J,K)       + ADD*FBL(I,K)*FACDWN(J)
-      D(I+1,J,K)    =  D(I+1,J,K)     + ADD*FBR(I,K)*FACDWN(J)
-      D(I,J,K+1)    =  D(I,J,K+1)     + ADD*FTL(I,K)*FACDWN(J)
-      D(I+1,J,K+1)  =  D(I+1,J,K+1)   + ADD*FTR(I,K)*FACDWN(J)
-      D(I,J-1,K)    =  D(I,J-1,K)     + ADD*FBL(I,K)*FACUP(J)
-      D(I+1,J-1,K)  =  D(I+1,J-1,K)   + ADD*FBR(I,K)*FACUP(J)
-      D(I,J-1,K+1)  =  D(I,J-1,K+1)   + ADD*FTL(I,K)*FACUP(J)
-      D(I+1,J-1,K+1)=  D(I+1,J-1,K+1) + ADD*FTR(I,K)*FACUP(J)
- 1100 CONTINUE
+C     Phase 1: Interior nodes (I=2..IMM1, J=2..JM-1, K=2..KMM1)
+C     All 8 contributions exist. FCDN/FCUP_J factored out.
+C
+      DO K=2,KMM1
+      DO J=2,JM-1
+      FCDN = FACDWN(J)
+      FCUP_J = FACUP(J+1)
+      DO I=2,IMM1
+      GSUM = (STORE(I,J,K)*FBL(I,K)
+     &      + STORE(I-1,J,K)*FBR(I-1,K)
+     &      + STORE(I,J,K-1)*FTL(I,K-1)
+     &      + STORE(I-1,J,K-1)*FTR(I-1,K-1))*FCDN
+     &     + (STORE(I,J+1,K)*FBL(I,K)
+     &      + STORE(I-1,J+1,K)*FBR(I-1,K)
+     &      + STORE(I,J+1,K-1)*FTL(I,K-1)
+     &      + STORE(I-1,J+1,K-1)*FTR(I-1,K-1))*FCUP_J
+      D(I,J,K) = D(I,J,K) + GSUM
+      ENDDO
+      ENDDO
+      ENDDO
+C
+C     Phase 2: Boundary faces only (3 non-overlapping pairs)
+C     K faces: 2*IM*JM, I faces: 2*JM*(KM-2),
+C     J faces: 2*(IM-2)*(KM-2).  Total ~111K vs 1.84M before.
+C
+C     --- K=1 and K=KM faces (all I, all J) ---
+      DO K=1,KM,KM-1
+      DO J=1,JM
+      DO I=1,IM
+      GSUM = 0.0
+      IF(J.GE.2) THEN
+      FCDN = FACDWN(J)
+      IF(I.LE.IMM1.AND.K.LE.KMM1)
+     & GSUM = GSUM + STORE(I,J,K)*FBL(I,K)*FCDN
+      IF(I.GE.2.AND.K.LE.KMM1)
+     & GSUM = GSUM + STORE(I-1,J,K)*FBR(I-1,K)*FCDN
+      IF(I.LE.IMM1.AND.K.GE.2)
+     & GSUM = GSUM + STORE(I,J,K-1)*FTL(I,K-1)*FCDN
+      IF(I.GE.2.AND.K.GE.2)
+     & GSUM = GSUM
+     & + STORE(I-1,J,K-1)*FTR(I-1,K-1)*FCDN
+      END IF
+      IF(J.LE.JM-1) THEN
+      FCUP_J = FACUP(J+1)
+      IF(I.LE.IMM1.AND.K.LE.KMM1)
+     & GSUM = GSUM + STORE(I,J+1,K)*FBL(I,K)*FCUP_J
+      IF(I.GE.2.AND.K.LE.KMM1)
+     & GSUM = GSUM
+     & + STORE(I-1,J+1,K)*FBR(I-1,K)*FCUP_J
+      IF(I.LE.IMM1.AND.K.GE.2)
+     & GSUM = GSUM
+     & + STORE(I,J+1,K-1)*FTL(I,K-1)*FCUP_J
+      IF(I.GE.2.AND.K.GE.2)
+     & GSUM = GSUM
+     & + STORE(I-1,J+1,K-1)*FTR(I-1,K-1)*FCUP_J
+      END IF
+      D(I,J,K) = D(I,J,K) + GSUM
+      ENDDO
+      ENDDO
+      ENDDO
+C
+C     --- I=1 and I=IM faces (all J, K=2..KMM1 interior) ---
+      DO K=2,KMM1
+      DO J=1,JM
+      DO I=1,IM,IM-1
+      GSUM = 0.0
+      IF(J.GE.2) THEN
+      FCDN = FACDWN(J)
+      IF(I.LE.IMM1)
+     & GSUM = GSUM + STORE(I,J,K)*FBL(I,K)*FCDN
+      IF(I.GE.2)
+     & GSUM = GSUM + STORE(I-1,J,K)*FBR(I-1,K)*FCDN
+      IF(I.LE.IMM1)
+     & GSUM = GSUM + STORE(I,J,K-1)*FTL(I,K-1)*FCDN
+      IF(I.GE.2)
+     & GSUM = GSUM
+     & + STORE(I-1,J,K-1)*FTR(I-1,K-1)*FCDN
+      END IF
+      IF(J.LE.JM-1) THEN
+      FCUP_J = FACUP(J+1)
+      IF(I.LE.IMM1)
+     & GSUM = GSUM + STORE(I,J+1,K)*FBL(I,K)*FCUP_J
+      IF(I.GE.2)
+     & GSUM = GSUM
+     & + STORE(I-1,J+1,K)*FBR(I-1,K)*FCUP_J
+      IF(I.LE.IMM1)
+     & GSUM = GSUM
+     & + STORE(I,J+1,K-1)*FTL(I,K-1)*FCUP_J
+      IF(I.GE.2)
+     & GSUM = GSUM
+     & + STORE(I-1,J+1,K-1)*FTR(I-1,K-1)*FCUP_J
+      END IF
+      D(I,J,K) = D(I,J,K) + GSUM
+      ENDDO
+      ENDDO
+      ENDDO
+C
+C     --- J=1 and J=JM faces (I=2..IMM1, K=2..KMM1 interior) ---
+      DO K=2,KMM1
+      DO J=1,JM,JM-1
+      DO I=2,IMM1
+      GSUM = 0.0
+      IF(J.GE.2) THEN
+      FCDN = FACDWN(J)
+      GSUM = GSUM + STORE(I,J,K)*FBL(I,K)*FCDN
+     & + STORE(I-1,J,K)*FBR(I-1,K)*FCDN
+     & + STORE(I,J,K-1)*FTL(I,K-1)*FCDN
+     & + STORE(I-1,J,K-1)*FTR(I-1,K-1)*FCDN
+      END IF
+      IF(J.LE.JM-1) THEN
+      FCUP_J = FACUP(J+1)
+      GSUM = GSUM + STORE(I,J+1,K)*FBL(I,K)*FCUP_J
+     & + STORE(I-1,J+1,K)*FBR(I-1,K)*FCUP_J
+     & + STORE(I,J+1,K-1)*FTL(I,K-1)*FCUP_J
+     & + STORE(I-1,J+1,K-1)*FTR(I-1,K-1)*FCUP_J
+      END IF
+      D(I,J,K) = D(I,J,K) + GSUM
+      ENDDO
+      ENDDO
+      ENDDO
 
       CALL TIMER_STOP(T_TSTEP_CELLNODE)
 C
