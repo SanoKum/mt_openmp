@@ -7061,7 +7061,12 @@ C*******************************************************************************
 C    CALLL  "SMOOTHVAR" TO APPLY THE SMOOTHING (ARTIFICIAL VISCOSITY) TO THE VARIABLE "D". 
 C
       CALL TIMER_START(T_TSTEP_SMOOTHVAR)
+C---- Region 3: SMOOTH_VAR with orphaned worksharing ----
+C     SMOOTH_VAR uses C$OMP DO internally (orphaned).
+C     This single PARALLEL region replaces 8 internal fork/join.
+C$OMP PARALLEL DEFAULT(NONE) SHARED(D)
       CALL SMOOTH_VAR(D)
+C$OMP END PARALLEL
       CALL TIMER_STOP(T_TSTEP_SMOOTHVAR)
 C
 C*******************************************************************************
@@ -17209,12 +17214,11 @@ C
 C
       INCLUDE 'commall-open-21.3'
 C
-      INTEGER OMP_GET_THREAD_NUM, TID
-      INTEGER MAXT
-      PARAMETER (MAXT=128)
+C     Thread-private local arrays (orphaned worksharing: each thread
+C     gets its own stack copy when called from within PARALLEL region)
       DIMENSION D(ID,JD,KD),
-     &          AVG_T(ID,MAXT),CURVE_T(ID,MAXT),SCURVE_T(ID,MAXT),
-     &          AVGK_T(KD,MAXT),CURVEK_T(KD,MAXT),SCURVEK_T(KD,MAXT)
+     &          AVG_T(ID),CURVE_T(ID),SCURVE_T(ID),
+     &          AVGK_T(KD),CURVEK_T(KD),SCURVEK_T(KD)
       REAL D_J1P1, D_J1P2, D_J1P3, D_J1P4
       REAL D_J2M1, D_J2M2, D_J2M3, D_J2M4
       INTEGER T_SV_STREAM, T_SV_LEAD
@@ -17236,13 +17240,12 @@ C
 C
 C      STREAMWISE SMOOTHING WITH CONSTANT COEFFICIENT, SFX
 C
+C$OMP MASTER
       CALL TIMER_START(T_SV_STREAM)
+C$OMP END MASTER
       DO 3990 NR = 1,NROWS
            J1 = JSTART(NR)
            J2 = JMIX(NR)
-C$OMP PARALLEL DEFAULT(NONE)
-C$OMP&PRIVATE(I,J,K,AVERG,CURV)
-C$OMP&SHARED(D,STORE,SFX1,SFX,FAC_4TH,IM,KM,J1,J2)
 C$OMP DO SCHEDULE(STATIC) COLLAPSE(2)
       DO J = J1+3,J2-3
             DO K=1,KM
@@ -17272,12 +17275,7 @@ C$OMP SIMD
             END DO
       END DO
 C$OMP END DO
-C$OMP END PARALLEL
 C
-C$OMP PARALLEL DEFAULT(NONE)
-C$OMP&PRIVATE(I,K,D_J1P1,D_J1P2,D_J1P3,D_J1P4,
-C$OMP&D_J2M1,D_J2M2,D_J2M3,D_J2M4)
-C$OMP&SHARED(D,STORE,SFXB1,SFXBH,SFXB,IM,KM,J1,J2)
 C$OMP DO SCHEDULE(STATIC)
       DO K=1,KM
 C$OMP SIMD
@@ -17307,12 +17305,13 @@ C$OMP SIMD
             END DO
       END DO
 C$OMP END DO
-C$OMP END PARALLEL
 
 C
  3990 CONTINUE
 
+C$OMP MASTER
       CALL TIMER_STOP(T_SV_STREAM)
+C$OMP END MASTER
 C
 C     END OF STREAMWISE SMOOTHING
 C
@@ -17321,13 +17320,12 @@ C*******************************************************************************
 C
 C      NOW APPLY SPECIAL SMOOTHING AROUND THE LEADING EDGE
 C
+C$OMP MASTER
       CALL TIMER_START(T_SV_LEAD)
+C$OMP END MASTER
       DO 4006 NR = 1,NROWS
       JS = JLED(NR)-2
       JE = JS + 1
-C$OMP PARALLEL DEFAULT(NONE)
-C$OMP&PRIVATE(J,K)
-C$OMP&SHARED(D,STORE,SFXHM1,SFX14,IM,IMM1,KM,JS,JE)
 C$OMP DO SCHEDULE(STATIC) COLLAPSE(2)
       DO 4004 J = JS,JE
       DO 4004 K=1,KM
@@ -17337,11 +17335,7 @@ C$OMP DO SCHEDULE(STATIC) COLLAPSE(2)
      &                         (D(2,J,K)+D(IMM1,J,K))
  4004 CONTINUE
 C$OMP END DO
-C$OMP END PARALLEL
       J = JLED(NR)
-C$OMP PARALLEL DEFAULT(NONE)
-C$OMP&PRIVATE(K)
-C$OMP&SHARED(D,STORE,SFXHM1,SFX14,IM,KM,J)
 C$OMP DO SCHEDULE(STATIC)
       DO 4007 K=1,KM
       STORE(1,J,K)  = SFXHM1*D(1,J,K)+SFX14*
@@ -17350,16 +17344,16 @@ C$OMP DO SCHEDULE(STATIC)
      &                       (D(IM,J+1,K)+D(1,J,K))
  4007 CONTINUE
 C$OMP END DO
-C$OMP END PARALLEL
  4006 CONTINUE
+C$OMP MASTER
       CALL TIMER_STOP(T_SV_LEAD)
+C$OMP END MASTER
 C*******************************************************************************
 C     RE-SET THE VARIABLE   "D"  TO THE NEW SMOOTHED VALUE..
 C
+C$OMP MASTER
       CALL TIMER_START(T_SV_RESET)
-C$OMP PARALLEL DEFAULT(NONE)
-C$OMP&PRIVATE(I,J,K,NR,J1,J2)
-C$OMP&SHARED(D,STORE,NROWS,KM,IM,JSTART,JMIX)
+C$OMP END MASTER
 C$OMP DO SCHEDULE(STATIC) COLLAPSE(2)
       DO NR = 1,NROWS
             DO K = 1,KM
@@ -17374,9 +17368,9 @@ C$OMP SIMD
             END DO
       END DO
 C$OMP END DO
-C$OMP END PARALLEL
-
+C$OMP MASTER
       CALL TIMER_STOP(T_SV_RESET)
+C$OMP END MASTER
 C
 C*******************************************************************************
 C*******************************************************************************
@@ -17391,60 +17385,55 @@ C
 C      
 C          NOW PERFORM THE PITCHWISE AND SPANWISE SMOOTHING.
 C
+C$OMP MASTER
       CALL TIMER_START(T_SV_PITCH)
-C$OMP PARALLEL DO DEFAULT(NONE) SCHEDULE(STATIC)
-C$OMP&PRIVATE(I,J,K,TID)
-C$OMP&SHARED(D,AVG_T,CURVE_T,SCURVE_T,
-C$OMP&AVGK_T,CURVEK_T,SCURVEK_T,
-C$OMP&FD,FU,FKD,FKU,IND,INDLE,
-C$OMP&IM,IMM1,IMM2,JM,KM,KMM1,KMM2,
-C$OMP&SFT,SFT1,FAC_4TH,SFTH,NUM3)
+C$OMP END MASTER
+C$OMP DO SCHEDULE(STATIC)
       DO J=2,JM
-      TID = OMP_GET_THREAD_NUM() + 1
 C  TFLOW ADDITION
       IF(IM.EQ.2) GO TO 9101
 C
       DO 9100 K=1,KM
 C$OMP SIMD
        DO 9110 I=2,IMM1
-       AVG_T(I,TID)    = FD(I)*D(I+1,J,K)+FU(I)*D(I-1,J,K)
-       CURVE_T(I,TID)  = D(I,J,K)-AVG_T(I,TID)
+       AVG_T(I)    = FD(I)*D(I+1,J,K)+FU(I)*D(I-1,J,K)
+       CURVE_T(I)  = D(I,J,K)-AVG_T(I)
  9110 CONTINUE
 C
       IF(IND(J).EQ.1.OR.INDLE(J).EQ.1) GO TO 9112
 C    SET VALUES ON THE PERIODIC BOUNDARIES
-      AVG_T(1,TID)    = 0.5*(D(2,J,K)+D(IMM1,J,K))
-      AVG_T(IM,TID)   = AVG_T(1,TID)
-      CURVE_T(1,TID)  = D(1,J,K)-AVG_T(1,TID)
-      CURVE_T(IM,TID) = CURVE_T(1,TID)
-      SCURVE_T(1,TID) = 0.5*(CURVE_T(2,TID)+CURVE_T(IMM1,TID))
-      SCURVE_T(IM,TID)= SCURVE_T(1,TID)
+      AVG_T(1)    = 0.5*(D(2,J,K)+D(IMM1,J,K))
+      AVG_T(IM)   = AVG_T(1)
+      CURVE_T(1)  = D(1,J,K)-AVG_T(1)
+      CURVE_T(IM) = CURVE_T(1)
+      SCURVE_T(1) = 0.5*(CURVE_T(2)+CURVE_T(IMM1))
+      SCURVE_T(IM)= SCURVE_T(1)
       GO TO 9113
 C
  9112 CONTINUE
 C     SET VALUES ON THE BLADE SURFACES
-      AVG_T(1,TID)    = D(2,J,K)
+      AVG_T(1)    = D(2,J,K)
      &                 + FU(1)*(D(2,J,K)-D(NUM3,J,K))
-      AVG_T(IM,TID)   = D(IMM1,J,K)
+      AVG_T(IM)   = D(IMM1,J,K)
      &                 + FU(IM)*(D(IMM1,J,K)-D(IMM2,J,K))
-      CURVE_T(1,TID)  = 0.0
-      CURVE_T(IM,TID) = 0.0
-      SCURVE_T(1,TID) = 0.0
-      SCURVE_T(IM,TID)= 0.0
+      CURVE_T(1)  = 0.0
+      CURVE_T(IM) = 0.0
+      SCURVE_T(1) = 0.0
+      SCURVE_T(IM)= 0.0
 C
  9113 CONTINUE
 C   SMOOTH THE SECOND DERIVATIVE, CURVE, TO FORM SCURVE .
 C$OMP SIMD
        DO 9120 I=2,IMM1
-       SCURVE_T(I,TID) = FU(I)*CURVE_T(I-1,TID)
-     &                  +FD(I)*CURVE_T(I+1,TID)
+       SCURVE_T(I) = FU(I)*CURVE_T(I-1)
+     &                  +FD(I)*CURVE_T(I+1)
  9120 CONTINUE
 C
 C     APPLY THE FINAL PITCHWISE SMOOTHING.
 C$OMP SIMD
         DO 9130 I=1,IM
               D(I,J,K) = SFT1*D(I,J,K)
-     &             +SFT*(AVG_T(I,TID)+FAC_4TH*SCURVE_T(I,TID))
+     &             +SFT*(AVG_T(I)+FAC_4TH*SCURVE_T(I))
  9130 CONTINUE
 C
  9100 CONTINUE
@@ -17459,32 +17448,32 @@ C
       DO 9300 I=1,IM
 C$OMP SIMD
        DO 9200 K=2,KMM1
-       AVGK_T(K,TID)   = FKD(K)*D(I,J,K+1)
+       AVGK_T(K)   = FKD(K)*D(I,J,K+1)
      &                  + FKU(K)*D(I,J,K-1)
-       CURVEK_T(K,TID) = D(I,J,K)-AVGK_T(K,TID)
+       CURVEK_T(K) = D(I,J,K)-AVGK_T(K)
  9200 CONTINUE
 C     FORM VALUES ON THE END WALLS
-      AVGK_T(1,TID)   = D(I,J,2)
+      AVGK_T(1)   = D(I,J,2)
      &                 +0.5*FKU(1)*(D(I,J,2)-D(I,J,3))
-      AVGK_T(KM,TID)  = D(I,J,KMM1)
+      AVGK_T(KM)  = D(I,J,KMM1)
      &                 +0.5*FKU(KM)*(D(I,J,KMM1)-D(I,J,KMM2))
-      CURVEK_T(1,TID) = 0.0
-      CURVEK_T(KM,TID)= 0.0
-      SCURVEK_T(1,TID)= 0.0
-      SCURVEK_T(KM,TID)=0.0
+      CURVEK_T(1) = 0.0
+      CURVEK_T(KM)= 0.0
+      SCURVEK_T(1)= 0.0
+      SCURVEK_T(KM)=0.0
 C     SMOOTH THE SECOND DERIVATIVE
 C$OMP SIMD
         DO 9210 K=2,KMM1
-              SCURVEK_T(K,TID) = FKU(K)*CURVEK_T(K-1,TID)
-     &                         + FKD(K)*CURVEK_T(K+1,TID)
+              SCURVEK_T(K) = FKU(K)*CURVEK_T(K-1)
+     &                         + FKD(K)*CURVEK_T(K+1)
  9210 CONTINUE
 C
 C    APPLY THE FINAL SPANWISE SMOOTHING
 C$OMP SIMD
         DO 9230 K=1,KM
               D(I,J,K) = SFT1*D(I,J,K)
-     &             + SFT*(AVGK_T(K,TID)
-     &             + FAC_4TH*SCURVEK_T(K,TID))
+     &             + SFT*(AVGK_T(K)
+     &             + FAC_4TH*SCURVEK_T(K))
  9230 CONTINUE
 C
  9300 CONTINUE
@@ -17503,9 +17492,10 @@ C
       D(IM,J,KM)= SFT1*D(IM,J,KM)
      &          + SFTH*(D(IMM1,J,KM)+D(IM,J,KMM1))
       END DO
-C$OMP END PARALLEL DO
-
+C$OMP END DO
+C$OMP MASTER
       CALL TIMER_STOP(T_SV_PITCH)
+C$OMP END MASTER
 C
 C*******************************************************************************
 C
@@ -17519,15 +17509,14 @@ C
       IF(SFEXIT.LT.0.0001) GO TO 8700
 C      
       JSSTART = JM + 1 - NSFEXIT
+C$OMP MASTER
       CALL TIMER_START(T_SV_EXIT)
+C$OMP END MASTER
       DO J= JSSTART,JM
 C   SMOOTH IN THE "I" DIRECTION
 C
       IF(IM.EQ.2) GO TO 8505
 C
-C$OMP PARALLEL DEFAULT(NONE)
-C$OMP&PRIVATE(I,K)
-C$OMP&SHARED(D,SFEX1,SFEXH,SFEXIT,IM,IMM1,IMM2,KM,J,NUM3)
 C$OMP DO SCHEDULE(STATIC)
       DO 8500 K=1,KM
       DO 8501 I=2,IMM1
@@ -17541,7 +17530,6 @@ C$OMP DO SCHEDULE(STATIC)
      &          -D(IM,J,K))
  8500 CONTINUE
 C$OMP END DO
-C$OMP END PARALLEL
 C
  8505 CONTINUE
 C
@@ -17549,9 +17537,6 @@ C  Q3D
       IF(KM.EQ.2) GO TO 8602
 C  END Q3D    
 C     SMOOTH IN THE "K" DIRECTION
-C$OMP PARALLEL DEFAULT(NONE)
-C$OMP&PRIVATE(I,K)
-C$OMP&SHARED(D,SFEX1,SFEXH,SFEXIT,IM,KM,KMM1,KMM2,J)
 C$OMP DO SCHEDULE(STATIC)
       DO 8600 I=1,IM
       DO 8601 K=2,KMM1
@@ -17565,13 +17550,14 @@ C$OMP DO SCHEDULE(STATIC)
      &          -D(I,J,KM))
  8600 CONTINUE
 C$OMP END DO
-C$OMP END PARALLEL
 C
  8602 CONTINUE
 C
       END DO
 
+C$OMP MASTER
       CALL TIMER_STOP(T_SV_EXIT)
+C$OMP END MASTER
 C
 C
  8700 CONTINUE
