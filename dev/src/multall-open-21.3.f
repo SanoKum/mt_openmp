@@ -3793,7 +3793,6 @@ C
       INTEGER T_LOOP_VRMS, T_LOOP_TFLOW, T_LOOP_INVSTEND
       INTEGER T_LOOP_NOINVZERO, T_LOOP_BLEED_SURF2
       INTEGER T_LOOP_CELLAVG
-      INTEGER ITABTIME, TS_CNT
       INTEGER T_TSTEP_DENS, T_TSTEP_SA, T_TSTEP_ROE, T_TSTEP_ROVX
       INTEGER T_TSTEP_RORVT, T_TSTEP_ROVR
       PARAMETER (T_LOOP_TOTAL=4)
@@ -3828,8 +3827,6 @@ C
       PARAMETER (T_LOOP_NOINVZERO=51)
       PARAMETER (T_LOOP_BLEED_SURF2=52)
       PARAMETER (T_LOOP_CELLAVG=53)
-
-      COMMON /TABTIME/ ITABTIME, TS_CNT
 
       DOUBLE PRECISION START, FINI, RUNTIME, POINTIME
 C
@@ -4253,59 +4250,42 @@ C
 C   CALCULATE NEW PRESSURES AND TEMPERATURES.THE METHOD DEPENDS ON THE FLOW MODEL, ITIMST.
 C
       CALL TIMER_START(T_LOOP_PRES)
-      !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(I,J,K,RONOW,EKE,TSTATIC,ESTAT,UNOW,PO_RO,HNOW,PNOW,TNOW,ENTPY_NOW,GA_PV_NOW,DRYNOW)
       IF(ITIMST.LT.5) THEN
 C
-      IF(IFGAS.EQ.0) THEN
-      !$OMP DO COLLAPSE(3) SCHEDULE(STATIC)
       DO 5900 K=1,KM
 C      CHANGED J = 2,JM  To J=1,JM FOR STEAM SO TABSEARCH IS CALLED AT J = 1.
       DO 5900 J=1,JM
       DO 5900 I=1,IM
+C
            RONOW = RO(I,J,K)
            EKE   =.5*(VR(I,J,K)*VR(I,J,K) + VT(I,J,K)*VT(I,J,K) 
      &           + VX(I,J,K)*VX(I,J,K))
+C
+      IF(IFGAS.EQ.0) THEN
            TSTATIC      = (ROE(I,J,K)/RONOW - EKE)/CV
            P(I,J,K)     = RONOW*RGAS*TSTATIC
            HO(I,J,K)    = CP*TSTATIC + EKE
            T_STATIC(I,J,K) = TSTATIC 
- 5900 CONTINUE
-      !$OMP END DO
       END IF
 C
       IF(IFGAS.EQ.1) THEN
-      !$OMP DO COLLAPSE(3) SCHEDULE(STATIC)
-      DO 5901 K=1,KM
-      DO 5901 J=1,JM
-      DO 5901 I=1,IM
-           RONOW = RO(I,J,K)
-           EKE   =.5*(VR(I,J,K)*VR(I,J,K) + VT(I,J,K)*VT(I,J,K) 
-     &           + VX(I,J,K)*VX(I,J,K))
            ESTAT        = ROE(I,J,K)/RONOW - EKE
            TSTATIC      = TFROME(ESTAT,TREF,EREF,ET1,ET2,ET3,ET4)
            IF(TSTATIC.LT.0.1*TREF) TSTATIC = 0.1*TREF
            P(I,J,K)     = RONOW*RGAS*TSTATIC
            HO(I,J,K)    = ESTAT + RGAS*TSTATIC + EKE
            T_STATIC(I,J,K) = TSTATIC 
- 5901 CONTINUE
-      !$OMP END DO
       END IF
 C
 C     CALL THE LOOK UP TABLE IF  "IFGAS" = 3
 C
       IF(IFGAS.EQ.3) THEN
-      ITABTIME = 1
-      TS_CNT = 0
-      !$OMP DO COLLAPSE(3) SCHEDULE(STATIC)
-      DO 5902 K=1,KM
-      DO 5902 J=1,JM
-      DO 5902 I=1,IM
-           RONOW = RO(I,J,K)
-           EKE   =.5*(VR(I,J,K)*VR(I,J,K) + VT(I,J,K)*VT(I,J,K) 
-     &           + VX(I,J,K)*VX(I,J,K))
+C
            UNOW   = ROE(I,J,K)/RONOW - EKE 
+C
            CALL TABSEARCH(RONOW,UNOW,
      &                    PNOW,TNOW,ENTPY_NOW,GA_PV_NOW,DRYNOW)
+C
            PO_RO            = PNOW/RONOW
            ROE(I,J,K)       = RONOW*(UNOW + EKE)
            HNOW             = UNOW + PO_RO
@@ -4321,10 +4301,10 @@ C
            WET(I,J,K)       = 1.0 - DRYNOW
            H_TO_T(I,J,K)    = TNOW/HNOW
            ENTPY(I,J,K)     = ENTPY_NOW
- 5902 CONTINUE
-      !$OMP END DO
-      ITABTIME = 0
+C   END OF IFGAS = 3 LOOP.
       END IF
+C
+ 5900 CONTINUE
 C
       END IF
 C
@@ -4342,7 +4322,6 @@ C      VSOUND   = RF_VSOUND1*VSOUND + RF_VSOUND*VS_NEW
       VSOUND   =  VSOUND + RF_VSOUND*DVSOUND
       DP_DRO   =  VSOUND*VSOUND
 C
-      !$OMP DO SCHEDULE(STATIC)
       DO 5950 K=1,KM
       DO 5950 J=2,JM
       DO 5950 I=1,IM
@@ -4356,11 +4335,8 @@ C
       HO(I,J,K)    = CP*TSTATIC  + EKE 
       T_STATIC(I,J,K) = TSTATIC
  5950 CONTINUE
-      !$OMP END DO
 C     END OF ITIMST = 5  OR 6 LOOP
       END IF
-
-      !$OMP END PARALLEL
 
       CALL TIMER_STOP(T_LOOP_PRES)
 C
@@ -7952,8 +7928,8 @@ C
           IF(DU.LT.0.0) UNOW  = UNOW + DU*ETAG
           IF(DU.GE.0.0) UNOW  = UNOW + DU/ETAG
 C
-            CALL TABSEARCH(RONOW,UNOW,
-     &                    PNOW,TNOW,ENTPY_NOW,GA_PV_NOW,DRYNOW)
+          CALL TABSEARCH(RONOW,UNOW,
+     &                 PNOW,TNOW,ENTPY_NOW,GA_PV_NOW,DRYNOW)
 C
           TS        = TNOW
           GA_PV_AVG = 0.5*(GA_PV_IN + GA_PV_NOW)
@@ -8038,7 +8014,7 @@ C
       DO 3311 NITS = 1,5
       UNOW  = HO(I,J,K) - EKE - P(I,J,K)/RONOW
 C
-            CALL TABSEARCH(RONOW,UNOW, 
+             CALL TABSEARCH(RONOW,UNOW, 
      &                    PNOW,TNOW,ENTPY_NOW,GA_PV_NOW,DRYNOW)
 C
       RONOW  = RONOW + (PGUESS(J) - PNOW)*RONOW/GA_PV_NOW/PGUESS(J)
@@ -17079,14 +17055,7 @@ C
 C
       INCLUDE 'commall-open-21.3'
 C
-      INTEGER OMP_GET_THREAD_NUM, TID
-      INTEGER MAXT
-      PARAMETER (MAXT=128)
-      DIMENSION D(ID,JD,KD),
-     &          AVG_T(ID,MAXT),CURVE_T(ID,MAXT),SCURVE_T(ID,MAXT),
-     &          AVGK_T(KD,MAXT),CURVEK_T(KD,MAXT),SCURVEK_T(KD,MAXT)
-      REAL D_J1P1, D_J1P2, D_J1P3, D_J1P4
-      REAL D_J2M1, D_J2M2, D_J2M3, D_J2M4
+      DIMENSION D(ID,JD,KD),AVG(JD),CURVE(JD),SCURVE(JD)
       INTEGER T_SV_STREAM, T_SV_LEAD
       INTEGER T_SV_RESET, T_SV_PITCH, T_SV_EXIT
       PARAMETER (T_SV_STREAM=42)
@@ -17110,64 +17079,41 @@ C
       DO 3990 NR = 1,NROWS
            J1 = JSTART(NR)
            J2 = JMIX(NR)
-      !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(I,J,K,AVERG,CURV)
-      !$OMP DO SCHEDULE(STATIC) COLLAPSE(2)
-      DO J = J1+3,J2-3
-            DO K=1,KM
-                  !$OMP SIMD
-                  DO I=1,IM
-                        AVERG = 0.5*(D(I,J+1,K)+D(I,J-1,K))
-                        CURV  = AVERG - 0.5*D(I,J,K) - 0.25*(D(I,J-2,K)+D(I,J+2,K))
-                        STORE(I,J,K) = SFX1*D(I,J,K) + SFX*(AVERG + FAC_4TH*CURV)
-                  END DO
-            END DO
-      END DO
-      !$OMP END DO NOWAIT
+      DO 3900 J = J1+3,J2-3
+      DO 3900 K=1,KM
+      DO 3900 I=1,IM
+           AVERG = 0.5*(D(I,J+1,K)+D(I,J-1,K))
+           CURV  = AVERG - 0.5*D(I,J,K) - 0.25*(D(I,J-2,K)+D(I,J+2,K))
+           STORE(I,J,K) = SFX1*D(I,J,K) + SFX*(AVERG + FAC_4TH*CURV)
+ 3900 CONTINUE
 C******************************************************************************************
 C******************************************************************************************
 C      EXTRA SMOOTHING AT THE UPSTREAM, DOWNSTREAM AND AND MIXING PLANE BOUNDARIES.
 C      THIS MODIFIED BY JDD  MARCH 2015. NEW VERSION GIVES BETTER RESULTS FOR SUPERSONIC
 C      FLOWS AT THE MIXING PLANE
 C
-      !$OMP DO SCHEDULE(STATIC)
-      DO K=1,KM
-            !$OMP SIMD
-            DO I=1,IM
-                  STORE(I,J2,K)   = D(I,J2,K)
-                  STORE(I,J1,K)   = D(I,J1,K)
-            END DO
-      END DO
-      !$OMP END DO
-      !$OMP END PARALLEL
+      DO 3905 K=1,KM
+      DO 3905 I=1,IM
+      STORE(I,J2,K)   = D(I,J2,K)
+      STORE(I,J1,K)   = D(I,J1,K)
+ 3905 CONTINUE
 C
-      !$OMP DO SCHEDULE(STATIC)
-      DO K=1,KM
-            !$OMP SIMD
-            DO I=1,IM
-                  D_J1P1 = D(I,J1+1,K)
-                  D_J1P2 = D(I,J1+2,K)
-                  D_J1P3 = D(I,J1+3,K)
-                  D_J1P4 = D(I,J1+4,K)
-                  D_J2M1 = D(I,J2-1,K)
-                  D_J2M2 = D(I,J2-2,K)
-                  D_J2M3 = D(I,J2-3,K)
-                  D_J2M4 = D(I,J2-4,K)
-
-                  STORE(I,J1+2,K) = SFXB1*D_J1P2
-     &                           + SFXBH*(D_J1P3 + D_J1P1)
-
-                  STORE(I,J1+1,K) = SFXB1*D_J1P1 + SFXB*
-     &                           (1.25*D_J1P2 + 0.5*D_J1P3 - 0.75*D_J1P4)
-
-                  STORE(I,J2-2,K) = SFXB1*D_J2M2
-     &                           + SFXBH*(D_J2M1 + D_J2M3)
-
-                  STORE(I,J2-1,K) = SFXB1*D_J2M1 + SFXB*
-     &                           (1.25*D_J2M2 + 0.5*D_J2M3 - 0.75*D_J2M4)
-            END DO
-      END DO
-      !$OMP END DO
-      !$OMP END PARALLEL
+      DO 3910 K=1,KM
+      DO 3910 I=1,IM
+C
+      STORE(I,J1+2,K) =   SFXB1*D(I,J1+2,K) 
+     &                +  SFXBH*(D(I,J1+3,K) + D(I,J1+1,K)  )
+C
+      STORE(I,J1+1,K) = SFXB1*D(I,J1+1,K) + SFXB*(1.25*D(I,J1+2,K)
+     &                 + 0.5*D(I,J1+3,K) -  0.75*D(I,J1+4,K) )
+C 
+      STORE(I,J2-2,K) =  SFXB1*D(I,J2-2,K)
+     &                + SFXBH*(D(I,J2-1,K)  + D(I,J2-3,K)  )
+C
+      STORE(I,J2-1,K) = SFXB1*D(I,J2-1,K) + SFXB*(1.25*D(I,J2-2,K)
+     &                  + 0.5*D(I,J2-3,K) - 0.75*D(I,J2-4,K) )
+C
+ 3910 CONTINUE
 
 C
  3990 CONTINUE
@@ -17185,8 +17131,6 @@ C
       DO 4006 NR = 1,NROWS
       JS = JLED(NR)-2
       JE = JS + 1
-      !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(J,K)
-      !$OMP DO SCHEDULE(STATIC) COLLAPSE(2)
       DO 4004 J = JS,JE
       DO 4004 K=1,KM
       STORE(1,J,K)  = SFXHM1*D(1,J,K) + SFX14*
@@ -17194,41 +17138,27 @@ C
       STORE(IM,J,K) = SFXHM1*D(IM,J,K) + SFX14*
      &                         (D(2,J,K)+D(IMM1,J,K))
  4004 CONTINUE
-      !$OMP END DO
-      !$OMP END PARALLEL
       J = JLED(NR)
-      !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(I,J,K,AVERG,CURV,D_J1P1,D_J1P2,D_J1P3,D_J1P4,D_J2M1,D_J2M2,D_J2M3,D_J2M4)
-      !$OMP DO SCHEDULE(STATIC)
       DO 4007 K=1,KM
       STORE(1,J,K)  = SFXHM1*D(1,J,K)+SFX14*
      &                      (D(1,J+1,K)+D(IM,J,K))
       STORE(IM,J,K) = SFXHM1*D(IM,J,K)+SFX14*
      &                       (D(IM,J+1,K)+D(1,J,K))
  4007 CONTINUE
-      !$OMP END DO
-      !$OMP END PARALLEL
  4006 CONTINUE
       CALL TIMER_STOP(T_SV_LEAD)
 C*******************************************************************************
 C     RE-SET THE VARIABLE   "D"  TO THE NEW SMOOTHED VALUE..
 C
       CALL TIMER_START(T_SV_RESET)
-      !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(I,J,K,NR,J1,J2)
-      !$OMP DO SCHEDULE(STATIC) COLLAPSE(2)
-      DO NR = 1,NROWS
-            DO K = 1,KM
-                  J1 = JSTART(NR)
-                  J2 = JMIX(NR)
-                  DO J = J1,J2
-                        !$OMP SIMD
-                        DO I = 1,IM
-                              D(I,J,K) = STORE(I,J,K)
-                        END DO
-                  END DO
-            END DO
-      END DO
-      !$OMP END DO
-      !$OMP END PARALLEL
+      DO 4015 NR = 1,NROWS
+      J1 = JSTART(NR)
+      J2 = JMIX(NR)
+      DO 4015 J  = J1,J2
+      DO 4015 K  = 1,KM
+      DO 4015 I  = 1,IM
+      D(I,J,K)   = STORE(I,J,K)
+ 4015 CONTINUE
 
       CALL TIMER_STOP(T_SV_RESET)
 C
@@ -17246,54 +17176,47 @@ C
 C          NOW PERFORM THE PITCHWISE AND SPANWISE SMOOTHING.
 C
       CALL TIMER_START(T_SV_PITCH)
-      !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(I,J,K,TID)
-      TID = OMP_GET_THREAD_NUM() + 1
-      DO J=2,JM
+      DO 9000 J=2,JM
 C  TFLOW ADDITION
       IF(IM.EQ.2) GO TO 9101
 C
-      !$OMP DO SCHEDULE(STATIC)
       DO 9100 K=1,KM
-C$OMP SIMD
-       DO 9110 I=2,IMM1
-       AVG_T(I,TID)    = FD(I)*D(I+1,J,K)+FU(I)*D(I-1,J,K)
-       CURVE_T(I,TID)  = D(I,J,K)-AVG_T(I,TID)
+      DO 9110 I=2,IMM1
+      AVG(I)    = FD(I)*D(I+1,J,K)+FU(I)*D(I-1,J,K)
+      CURVE(I)  = D(I,J,K)-AVG(I)
  9110 CONTINUE
 C
       IF(IND(J).EQ.1.OR.INDLE(J).EQ.1) GO TO 9112
 C    SET VALUES ON THE PERIODIC BOUNDARIES
-      AVG_T(1,TID)    = 0.5*(D(2,J,K)+D(IMM1,J,K))
-      AVG_T(IM,TID)   = AVG_T(1,TID)
-      CURVE_T(1,TID)  = D(1,J,K)-AVG_T(1,TID)
-      CURVE_T(IM,TID) = CURVE_T(1,TID)
-      SCURVE_T(1,TID) = 0.5*(CURVE_T(2,TID)+CURVE_T(IMM1,TID))
-      SCURVE_T(IM,TID)= SCURVE_T(1,TID)
+      AVG(1)    = 0.5*(D(2,J,K)+D(IMM1,J,K))
+      AVG(IM)   = AVG(1)
+      CURVE(1)  = D(1,J,K)-AVG(1)
+      CURVE(IM) = CURVE(1)
+      SCURVE(1) = 0.5*(CURVE(2)+CURVE(IMM1))
+      SCURVE(IM)= SCURVE(1)  
       GO TO 9113
 C
  9112 CONTINUE
 C     SET VALUES ON THE BLADE SURFACES
-      AVG_T(1,TID)    = D(2,J,K)    + FU(1)*(D(2,J,K)-D(NUM3,J,K))
-      AVG_T(IM,TID)   = D(IMM1,J,K) + FU(IM)*(D(IMM1,J,K)-D(IMM2,J,K))
-      CURVE_T(1,TID)  = 0.0
-      CURVE_T(IM,TID) = 0.0
-      SCURVE_T(1,TID) = 0.0
-      SCURVE_T(IM,TID)= 0.0
+      AVG(1)    = D(2,J,K)    + FU(1)*(D(2,J,K)-D(NUM3,J,K))
+      AVG(IM)   = D(IMM1,J,K) + FU(IM)*(D(IMM1,J,K)-D(IMM2,J,K))
+      CURVE(1)  = 0.0
+      CURVE(IM) = 0.0
+      SCURVE(1) = 0.0
+      SCURVE(IM)= 0.0
 C
  9113 CONTINUE
 C   SMOOTH THE SECOND DERIVATIVE, CURVE, TO FORM SCURVE .
-C$OMP SIMD
-       DO 9120 I=2,IMM1
-       SCURVE_T(I,TID) = FU(I)*CURVE_T(I-1,TID)+FD(I)*CURVE_T(I+1,TID)
+      DO 9120 I=2,IMM1
+      SCURVE(I) = FU(I)*CURVE(I-1)+FD(I)*CURVE(I+1)
  9120 CONTINUE
 C
 C     APPLY THE FINAL PITCHWISE SMOOTHING.
-C$OMP SIMD
-        DO 9130 I=1,IM
-              D(I,J,K) = SFT1*D(I,J,K) +SFT*(AVG_T(I,TID) + FAC_4TH*SCURVE_T(I,TID))
+      DO 9130 I=1,IM
+      D(I,J,K) = SFT1*D(I,J,K) +SFT*(AVG(I) + FAC_4TH*SCURVE(I))
  9130 CONTINUE
 C
  9100 CONTINUE
-      !$OMP END DO
 C  TFLOW ADDITION
  9101 CONTINUE
 C*******************************************************************************
@@ -17302,48 +17225,40 @@ C  Q3D
       IF(KM.EQ.2) GO TO 9301
 C  END Q3D
 C
-      !$OMP DO SCHEDULE(STATIC)
       DO 9300 I=1,IM
-C$OMP SIMD
-       DO 9200 K=2,KMM1
-       AVGK_T(K,TID)   = FKD(K)*D(I,J,K+1) + FKU(K)*D(I,J,K-1)
-       CURVEK_T(K,TID) = D(I,J,K)-AVGK_T(K,TID)
+      DO 9200 K=2,KMM1
+      AVG(K)   = FKD(K)*D(I,J,K+1) + FKU(K)*D(I,J,K-1)
+      CURVE(K) = D(I,J,K)-AVG(K)
  9200 CONTINUE
 C     FORM VALUES ON THE END WALLS
-      AVGK_T(1,TID)   = D(I,J,2) +0.5*FKU(1)*(D(I,J,2)-D(I,J,3))
-      AVGK_T(KM,TID)  = D(I,J,KMM1)+0.5*FKU(KM)*(D(I,J,KMM1)-D(I,J,KMM2))
-      CURVEK_T(1,TID) = 0.0
-      CURVEK_T(KM,TID)= 0.0
-      SCURVEK_T(1,TID)= 0.0
-      SCURVEK_T(KM,TID)=0.0
+      AVG(1)   = D(I,J,2) +0.5*FKU(1)*(D(I,J,2)-D(I,J,3))
+      AVG(KM)  = D(I,J,KMM1)+0.5* FKU(KM)*(D(I,J,KMM1)-D(I,J,KMM2))
+      CURVE(1) = 0.0
+      CURVE(KM)= 0.0
+      SCURVE(1)= 0.0
+      SCURVE(KM)=0.0
 C     SMOOTH THE SECOND DERIVATIVE
-C$OMP SIMD
-        DO 9210 K=2,KMM1
-              SCURVEK_T(K,TID) = FKU(K)*CURVEK_T(K-1,TID) + FKD(K)*CURVEK_T(K+1,TID)
+      DO 9210 K=2,KMM1
+      SCURVE(K) = FKU(K)*CURVE(K-1) + FKD(K)*CURVE(K+1)
  9210 CONTINUE
 C
 C    APPLY THE FINAL SPANWISE SMOOTHING
-C$OMP SIMD
-        DO 9230 K=1,KM
-              D(I,J,K)  = SFT1*D(I,J,K) + SFT*(AVGK_T(K,TID) + FAC_4TH*SCURVEK_T(K,TID))
+      DO 9230 K=1,KM
+      D(I,J,K)  = SFT1*D(I,J,K) + SFT*(AVG(K)+FAC_4TH*SCURVE(K))
  9230 CONTINUE
 C
  9300 CONTINUE
-      !$OMP END DO
 C
  9301 CONTINUE
 C
 C*******************************************************************************
 C   SMOOTHING OF THE CORNER POINTS USING SFT .
 C
-      !$OMP SINGLE
       D(1,J,1)  = SFT1*D(1,J,1)  + SFTH*(D(2,J,1)+D(1,J,2))
       D(IM,J,1) = SFT1*D(IM,J,1) + SFTH*(D(IMM1,J,1)+D(IM,J,2))
       D(1,J,KM) = SFT1*D(1,J,KM) + SFTH*(D(1,J,KMM1)+D(2,J,KM))
       D(IM,J,KM)= SFT1*D(IM,J,KM)+ SFTH*(D(IMM1,J,KM)+D(IM,J,KMM1))
-      !$OMP END SINGLE
-      END DO
-      !$OMP END PARALLEL
+ 9000 CONTINUE
 
       CALL TIMER_STOP(T_SV_PITCH)
 C
@@ -17360,13 +17275,11 @@ C
 C      
       JSSTART = JM + 1 - NSFEXIT
       CALL TIMER_START(T_SV_EXIT)
-      DO J= JSSTART,JM
+      DO 8502 J= JSSTART,JM
 C   SMOOTH IN THE "I" DIRECTION
 C
       IF(IM.EQ.2) GO TO 8505
 C
-      !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(I,K)
-      !$OMP DO SCHEDULE(STATIC)
       DO 8500 K=1,KM
       DO 8501 I=2,IMM1
       D(I,J,K) = SFEX1*D(I,J,K)+SFEXH*(D(I+1,J,K)+D(I-1,J,K))
@@ -17374,8 +17287,6 @@ C
       D(1,J,K) = D(1,J,K) +SFEXIT*(2.*D(2,J,K)-D(NUM3,J,K)-D(1,J,K))
       D(IM,J,K)= D(IM,J,K)+SFEXIT*(2.*D(IMM1,J,K)-D(IMM2,J,K)-D(IM,J,K))
  8500 CONTINUE
-      !$OMP END DO
-      !$OMP END PARALLEL
 C
  8505 CONTINUE
 C
@@ -17383,8 +17294,6 @@ C  Q3D
       IF(KM.EQ.2) GO TO 8602
 C  END Q3D    
 C     SMOOTH IN THE "K" DIRECTION
-      !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(I,K)
-      !$OMP DO SCHEDULE(STATIC)
       DO 8600 I=1,IM
       DO 8601 K=2,KMM1
       D(I,J,K) = SFEX1*D(I,J,K)+SFEXH*(D(I,J,K-1) +D(I,J,K+1))
@@ -17392,12 +17301,10 @@ C     SMOOTH IN THE "K" DIRECTION
       D(I,J,1) = D(I,J,1) +SFEXIT*(2.*D(I,J,2)-D(I,J,3)-D(I,J,1))
       D(I,J,KM)= D(I,J,KM)+SFEXIT*(2.*D(I,J,KMM1)-D(I,J,KMM2)-D(I,J,KM))
  8600 CONTINUE
-      !$OMP END DO
-      !$OMP END PARALLEL
 C
  8602 CONTINUE
 C
-      END DO
+ 8502 CONTINUE
 
       CALL TIMER_STOP(T_SV_EXIT)
 C
@@ -19166,7 +19073,6 @@ C**********************************************************************
       SUBROUTINE READ_TABLE
 C
       INCLUDE 'commall-open-21.3'
-      REAL V00,V10,V01,V11
 C
       OPEN(UNIT = 9, FILE= 'props_table.dat')
 C
@@ -19281,7 +19187,7 @@ C
       DO 180 I = 1 , ITAB
       READ(9,*)  DUMMY
       READ(9,*)  DUMMY
-        READ(9,93) (DRY_TAB(I,J),J=1,JTAB)
+      READ(9,93) (DRY_TAB(I,J),J=1,JTAB)
   180 CONTINUE
 C
 C    CHECK FOR ANY DISCONTINUITIES IN THE TABULATED DATA.
@@ -19302,61 +19208,6 @@ C
       WRITE(6,*) ' CHECKING DRYNESS '
       CALL CHECK_TAB(ITB,JTB,ITAB,JTAB,DRY_TAB)
       WRITE(6,*)
-C
-      DO I = 1,ITAB
-      DO J = 1,JTAB
-      P_HDI_TAB(I,J) = 0.0
-      P_HDJ_TAB(I,J) = 0.0
-      T_HDI_TAB(I,J) = 0.0
-      T_HDJ_TAB(I,J) = 0.0
-      ENT_HDI_TAB(I,J) = 0.0
-      ENT_HDJ_TAB(I,J) = 0.0
-      GA_HDI_TAB(I,J) = 0.0
-      GA_HDJ_TAB(I,J) = 0.0
-      DRY_HDI_TAB(I,J) = 0.0
-      DRY_HDJ_TAB(I,J) = 0.0
-      END DO
-      END DO
-C
-C     PRECOMPUTE HALF-SLOPES FOR 2D INTERPOLATION (FINDIT5)
-      DO I = 1,ITAB-1
-      DO J = 1,JTAB-1
-      V00 = P_TAB(I,J)
-      V10 = P_TAB(I+1,J)
-      V01 = P_TAB(I,J+1)
-      V11 = P_TAB(I+1,J+1)
-      P_HDI_TAB(I,J) = 0.5*((V10 - V00) + (V11 - V01))
-      P_HDJ_TAB(I,J) = 0.5*((V01 - V00) + (V11 - V10))
-C
-      V00 = T_TAB(I,J)
-      V10 = T_TAB(I+1,J)
-      V01 = T_TAB(I,J+1)
-      V11 = T_TAB(I+1,J+1)
-      T_HDI_TAB(I,J) = 0.5*((V10 - V00) + (V11 - V01))
-      T_HDJ_TAB(I,J) = 0.5*((V01 - V00) + (V11 - V10))
-C
-      V00 = ENT_TAB(I,J)
-      V10 = ENT_TAB(I+1,J)
-      V01 = ENT_TAB(I,J+1)
-      V11 = ENT_TAB(I+1,J+1)
-      ENT_HDI_TAB(I,J) = 0.5*((V10 - V00) + (V11 - V01))
-      ENT_HDJ_TAB(I,J) = 0.5*((V01 - V00) + (V11 - V10))
-C
-      V00 = GA_PV_TAB(I,J)
-      V10 = GA_PV_TAB(I+1,J)
-      V01 = GA_PV_TAB(I,J+1)
-      V11 = GA_PV_TAB(I+1,J+1)
-      GA_HDI_TAB(I,J) = 0.5*((V10 - V00) + (V11 - V01))
-      GA_HDJ_TAB(I,J) = 0.5*((V01 - V00) + (V11 - V10))
-C
-      V00 = DRY_TAB(I,J)
-      V10 = DRY_TAB(I+1,J)
-      V01 = DRY_TAB(I,J+1)
-      V11 = DRY_TAB(I+1,J+1)
-      DRY_HDI_TAB(I,J) = 0.5*((V10 - V00) + (V11 - V01))
-      DRY_HDJ_TAB(I,J) = 0.5*((V01 - V00) + (V11 - V10))
-      END DO
-      END DO
 C
       ROMIN = 1.0E10
       ROMAX = 0.0
@@ -19469,7 +19320,7 @@ C******************************************************************************
 
        SUBROUTINE TIMER_INIT
       INTEGER NT
-      PARAMETER (NT=55)
+      PARAMETER (NT=53)
        DOUBLE PRECISION TSTART, TACCUM
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
        INTEGER I
@@ -19486,7 +19337,7 @@ C******************************************************************************
        SUBROUTINE TIMER_START(ID)
        INTEGER ID
       INTEGER NT
-      PARAMETER (NT=55)
+      PARAMETER (NT=53)
        DOUBLE PRECISION TSTART, TACCUM, NOW
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -19500,7 +19351,7 @@ C******************************************************************************
        SUBROUTINE TIMER_STOP(ID)
        INTEGER ID
       INTEGER NT
-      PARAMETER (NT=55)
+      PARAMETER (NT=53)
        DOUBLE PRECISION TSTART, TACCUM, NOW
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -19511,22 +19362,9 @@ C******************************************************************************
 
 C******************************************************************************
 
-            SUBROUTINE TIMER_ACCUM(ID, DT)
-            INTEGER ID
-            INTEGER NT
-            PARAMETER (NT=55)
-            DOUBLE PRECISION TSTART, TACCUM, DT
-            COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
-
-            TACCUM(ID) = TACCUM(ID) + DT
-            RETURN
-            END
-
-C******************************************************************************
-
        SUBROUTINE TIMER_REPORT
       INTEGER NT
-      PARAMETER (NT=55)
+      PARAMETER (NT=53)
        DOUBLE PRECISION TSTART, TACCUM
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
       CHARACTER*40 NAME(NT)
@@ -19585,8 +19423,6 @@ C******************************************************************************
                   DATA NAME(51) /'LOOP: NO-INV SURF ZERO'/
                   DATA NAME(52) /'LOOP: BLEED SURF FLUX'/
                   DATA NAME(53) /'LOOP: CELL AVG DENSITY'/
-                  DATA NAME(54) /'LOOP: TABSEARCH'/
-                  DATA NAME(55) /'LOOP: TABINTERP'/
 
        WRITE(4,*)
        WRITE(4,*) '================ WALL TIME SUMMARY (s) ================'
@@ -19618,21 +19454,6 @@ C
 C
       INCLUDE 'commall-open-21.3'
 C
-      INTEGER T_LOOP_PRES_SEARCH, T_LOOP_PRES_INTERP
-      INTEGER TSAMPLE, TS_CNT, ISAMPLE, ITABTIME
-      PARAMETER (T_LOOP_PRES_SEARCH=54)
-      PARAMETER (T_LOOP_PRES_INTERP=55)
-      PARAMETER (TSAMPLE=100)
-      DOUBLE PRECISION T0, T1, DT
-      COMMON /TABTIME/ ITABTIME, TS_CNT
-C
-      ISAMPLE = 0
-      IF(ITABTIME.EQ.1) THEN
-            TS_CNT = TS_CNT + 1
-            IF(MOD(TS_CNT,TSAMPLE).EQ.0) ISAMPLE = 1
-            IF(ISAMPLE.EQ.1) CALL WALLTIME(T0)
-      END IF
-C
 C******************************************************************************
 C******************************************************************************
 C   CHECK THAT THE DENSITY AND ENERGY VALUES ARE WITHIN THE TABULATED RANGE.
@@ -19641,84 +19462,75 @@ C
        IF(RHOIN.GT.ROMAXX) RHOIN = ROMAXX
        IF(UIN.LT.UMINN)      UIN = UMINN
        IF(UIN.GT.UMAXX)      UIN = UMAXX
-
 C
 C     FIRST SPLIT THE DENSITY "I"  AXIS INTO TWO HALVES
-             ISTART = 1
-             IEND   = I_MID-1
+            ISTART = 1
+            IEND   = I_MID-1
       IF(RHOIN.GT.ROAXIS(I_MID)) THEN
-            ISTART = I_MID
-            IEND   = ITAB
+           ISTART = I_MID
+           IEND   = ITAB
       END IF
 C
 C     NEXT SEARCH THE DENSITY, "I"  AXIS WITH A COARSE STEP = N_BLOCK
       N_BLOCK = 8
       DO 112 I = ISTART,IEND,N_BLOCK
-              INEXT = I + N_BLOCK
-              IF(INEXT.GT.ITAB) INEXT = ITAB
+             INEXT = I + N_BLOCK
+             IF(INEXT.GT.ITAB) INEXT = ITAB
       IF(ROAXIS(INEXT).GT.RHOIN) THEN
-            ISTART2 = I
-            IEND2   = INEXT
-            GO TO 111
+           ISTART2 = I
+           IEND2   = INEXT
+           GO TO 111
       END IF
- 112  CONTINUE
+  112 CONTINUE
        ISTART2 = IEND + 1 - N_BLOCK
        IEND2   = IEND
- 111  CONTINUE
+  111 CONTINUE
 C
 C   NOW SEARCH THE "I" AXIS WITH A SINGLE BLOCK STEP
       DO 212 I = ISTART2,IEND2-1
       IF(ROAXIS(I+1).GT.RHOIN) THEN
-            IFOUND   = I
-            GO TO 211
+           IFOUND   = I
+           GO TO 211
       END IF
- 212  CONTINUE
+  212 CONTINUE
       IFOUND = IEND2 - 1
- 211  CONTINUE
+  211 CONTINUE
       IFP1  = IFOUND  + 1
 C
 C******************************************************************************
 C******************************************************************************
 C     FIRST SPLIT THE INTERNAL ENERGY "J"  AXIS INTO TWO HALVES
-             JSTRT = 1
-             JEND   = J_MID-1
+            JSTRT = 1
+            JEND   = J_MID-1
       IF(UIN.GT.UAXIS(J_MID)) THEN
-            JSTRT  = J_MID
-            JEND   = JTAB
+           JSTRT  = J_MID
+           JEND   = JTAB
       END IF
 C
 C     NEXT SEARCH THE  INTERNAL ENERGY "J"  AXIS WITH A COARSE STEP = N_BLOCK
       N_BLOCK = 8
       DO 312 J = JSTRT,JEND,N_BLOCK
-              JNEXT = J + N_BLOCK
-              IF(JNEXT.GT.JTAB) JNEXT = JTAB
+             JNEXT = J + N_BLOCK
+             IF(JNEXT.GT.JTAB) JNEXT = JTAB
       IF(UAXIS(JNEXT).GT.UIN) THEN
-            JSTRT2 = J
-            JEND2   = JNEXT
-            GO TO 311
+           JSTRT2 = J
+           JEND2   = JNEXT
+           GO TO 311
       END IF
- 312  CONTINUE
+  312 CONTINUE
        JSTRT2  = JEND + 1 - N_BLOCK
        JEND2   = JEND
- 311  CONTINUE
+  311 CONTINUE
 C
 C   NOW SEARCH THE "J" AXIS WITH A SINGLE BLOCK STEP
       DO 412 J = JSTRT2,JEND2-1
       IF(UAXIS(J+1).GT.UIN) THEN
-           JFOUND   = J
-            GO TO 411
+          JFOUND   = J
+           GO TO 411
       END IF
- 412  CONTINUE
+  412 CONTINUE
       JFOUND = JEND2 - 1
- 411  CONTINUE
-      JFP1  = JFOUND  + 1
-C
-C     CLAMP TO VALID CELL RANGE
-      IF(IFOUND.LT.1) IFOUND = 1
-      IF(IFOUND.GE.ITAB) IFOUND = ITAB - 1
-      IF(JFOUND.LT.1) JFOUND = 1
-      IF(JFOUND.GE.JTAB) JFOUND = JTAB - 1
-      IFP1  = IFOUND  + 1
+  411 CONTINUE
       JFP1  = JFOUND  + 1
 C
 C******************************************************************************
@@ -19729,23 +19541,25 @@ C
 C
 C******************************************************************************
 C
-      IF(ISAMPLE.EQ.1) THEN
-            CALL WALLTIME(T1)
-            DT = (T1 - T0)*TSAMPLE
-            CALL TIMER_ACCUM(T_LOOP_PRES_SEARCH, DT)
-            CALL WALLTIME(T0)
-      END IF
-      CALL FINDIT5(ITB,JTB,IFOUND,JFOUND,DIFRO,DIFU,
-     &             P_TAB,T_TAB,ENT_TAB,GA_PV_TAB,DRY_TAB,
-     &             P_HDI_TAB,P_HDJ_TAB,T_HDI_TAB,T_HDJ_TAB,
-     &             ENT_HDI_TAB,ENT_HDJ_TAB,GA_HDI_TAB,GA_HDJ_TAB,
-     &             DRY_HDI_TAB,DRY_HDJ_TAB,
-     &             PFOUND,TFOUND,ENTFOUND,GAFOUND,DRYFOUND)
-      IF(ISAMPLE.EQ.1) THEN
-            CALL WALLTIME(T1)
-            DT = (T1 - T0)*TSAMPLE
-            CALL TIMER_ACCUM(T_LOOP_PRES_INTERP, DT)
-      END IF
+      CALL FINDIT(ITB,JTB,IFOUND,JFOUND,IFP1,JFP1,DIFRO,DIFU,
+     &            P_TAB,PFOUND)
+C      WRITE(6,*) ' PFOUND = ', PFOUND
+
+      CALL FINDIT(ITB,JTB,IFOUND,JFOUND,IFP1,JFP1,DIFRO,DIFU,
+     &            T_TAB,TFOUND)
+C      WRITE(6,*) ' TFOUND = ', TFOUND
+
+      CALL FINDIT(ITB,JTB,IFOUND,JFOUND,IFP1,JFP1,DIFRO,DIFU,
+     &            ENT_TAB,ENTFOUND)
+C      WRITE(6,*) ' ENTFOUND = ', ENTFOUND
+
+      CALL FINDIT(ITB,JTB,IFOUND,JFOUND,IFP1,JFP1,DIFRO,DIFU,
+     &            GA_PV_TAB,GAFOUND)
+C      WRITE(6,*) ' GAFOUND = ', GAFOUND
+
+      CALL FINDIT(ITB,JTB,IFOUND,JFOUND,IFP1,JFP1,DIFRO,DIFU,
+     &            DRY_TAB,DRYFOUND)
+C      WRITE(6,*) ' DRYFOUND = ', DRYFOUND
 C
       RETURN
 C
@@ -19758,6 +19572,7 @@ C
      &                  DIFRO,DIFU,VAR,VFOUND)
 C
       DIMENSION VAR(ITB,JTB)
+C      
       DFDI = VAR(IFP1,JFOUND)  - VAR(IFOUND,JFOUND)
      &     + VAR(IFP1,JFP1)    - VAR(IFOUND,JFP1)
       DFDJ = VAR(IFOUND,JFP1)  - VAR(IFOUND,JFOUND) 
@@ -19770,57 +19585,6 @@ C
 C
       RETURN
       END
-
-
-
-C
-C***********************************************************************************
-C***********************************************************************************
-C
-      SUBROUTINE FINDIT5(ITB,JTB,IFOUND,JFOUND,DIFRO,DIFU,
-     &                   VAR1,VAR2,VAR3,VAR4,VAR5,
-     &                   HDI1,HDJ1,HDI2,HDJ2,HDI3,HDJ3,
-     &                   HDI4,HDJ4,HDI5,HDJ5,
-     &                   V1,V2,V3,V4,V5)
-C
-      INTEGER ITB,JTB,IFOUND,JFOUND
-      REAL DIFRO,DIFU
-      REAL VAR1(ITB,JTB),VAR2(ITB,JTB),VAR3(ITB,JTB),
-     &     VAR4(ITB,JTB),VAR5(ITB,JTB)
-      REAL HDI1(ITB,JTB),HDJ1(ITB,JTB),HDI2(ITB,JTB),HDJ2(ITB,JTB)
-      REAL HDI3(ITB,JTB),HDJ3(ITB,JTB),HDI4(ITB,JTB),HDJ4(ITB,JTB)
-      REAL HDI5(ITB,JTB),HDJ5(ITB,JTB)
-      REAL V1,V2,V3,V4,V5
-      REAL DX,DY
-      REAL V00
-C
-      DX   = DIFRO
-      DY   = DIFU
-C
-      V00 = VAR1(IFOUND,JFOUND)
-      V1 = V00 + DX*HDI1(IFOUND,JFOUND)
-     &          + DY*HDJ1(IFOUND,JFOUND)
-C
-      V00 = VAR2(IFOUND,JFOUND)
-      V2 = V00 + DX*HDI2(IFOUND,JFOUND)
-     &          + DY*HDJ2(IFOUND,JFOUND)
-C
-      V00 = VAR3(IFOUND,JFOUND)
-      V3 = V00 + DX*HDI3(IFOUND,JFOUND)
-     &          + DY*HDJ3(IFOUND,JFOUND)
-C
-      V00 = VAR4(IFOUND,JFOUND)
-      V4 = V00 + DX*HDI4(IFOUND,JFOUND)
-     &          + DY*HDJ4(IFOUND,JFOUND)
-C
-      V00 = VAR5(IFOUND,JFOUND)
-      V5 = V00 + DX*HDI5(IFOUND,JFOUND)
-     &          + DY*HDJ5(IFOUND,JFOUND)
-C
-      RETURN
-      END
-
-
 C
 C***********************************************************************************
 C***********************************************************************************
