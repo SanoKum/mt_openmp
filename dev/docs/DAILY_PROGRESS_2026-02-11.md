@@ -708,3 +708,44 @@ MOM FLUX BUILD の 10 個の `C$OMP PARALLEL DO` を 3 方向ごとに 1 つの 
 
 - MASS FLUX（1.70s、シリアル）の並列化に着手
 - ENERGY FLUX/SOURCE（1.13s、シリアル）も候補
+
+---
+
+## セッション 4: MASS FLUX / RFLUX 並列化
+
+### 実施内容
+
+1. **計画策定**: `OPENMP_PLAN_MASS_FLUX.md` を作成。4ループの依存関係を分析。
+
+2. **統一 PARALLEL リージョン実装**
+   - DO 5020 (FLOWX) + DO 5025 (ROWT/WT) を NOWAIT で並行実行
+   - DO 5030 (FLOWT) は barrier 後（ROWT を読む）
+   - DO 5050 (Cusp balance) は barrier 後（FLOWT を読む）
+   - DO 5040 (RFLUX) はタイマー別区間のため独立 `C$OMP PARALLEL DO`
+
+3. **C$OMP SIMD 追加試行**
+   - I方向最内ループに SIMD を明示 → 効果なし（auto-vectorize で既にベクトル化済み）
+   - リバート
+
+### 結果サマリ
+
+| 項目 | Before (OMP=4) | After (OMP=4) | 改善 |
+|------|----------------|--------------|------|
+| MASS FLUX | 1.70s | 1.34s | -0.37s (1.27x) |
+| RFLUX | 0.48s | 0.38s | -0.10s (1.27x) |
+| LOOP TOTAL | 24.71s | 24.34s | -0.37s |
+
+### 学んだこと
+
+- MASS FLUX 系ループは単純な加算+乗算で演算密度が低く、**メモリバウンド**。スケーリングは 1.27x に留まる（MOM FLUX BUILD と同程度）。
+- gfortran -O3 が I方向最内ループを **既に AVX2 auto-vectorize** しているため、C$OMP SIMD の明示は効果なし。
+- NOWAIT による DO 5020/5025 の並行実行は正しく動作。
+
+### 保存ログ
+
+- `stage.log.massflux_omp4` — 統一 PARALLEL, OMP=4（採用版）
+
+### 次のアクション
+
+- ENERGY FLUX/SOURCE（1.13s、シリアル）の並列化
+- DELTA/STORE（2.12s）の再検討
