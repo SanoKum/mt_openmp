@@ -4266,7 +4266,7 @@ C$OMP&VMAX,VS_NEW,FRACDIF,DVSOUND)
       IF(ITIMST.LT.5) THEN
 C
       IF(IFGAS.EQ.0) THEN
-C$OMP DO COLLAPSE(3) SCHEDULE(STATIC)
+C$OMP DO SCHEDULE(STATIC)
       DO 5900 K=1,KM
 C      CHANGED J = 2,JM  To J=1,JM FOR STEAM SO TABSEARCH IS CALLED AT J = 1.
       DO 5900 J=1,JM
@@ -4283,7 +4283,7 @@ C$OMP END DO
       END IF
 C
       IF(IFGAS.EQ.1) THEN
-C$OMP DO COLLAPSE(3) SCHEDULE(STATIC)
+C$OMP DO SCHEDULE(STATIC)
       DO 5901 K=1,KM
       DO 5901 J=1,JM
       DO 5901 I=1,IM
@@ -6535,6 +6535,11 @@ C       ====================
 C
       DIMENSION D(ID,JD,KD), DIFF(ID,JD,KD),AVG(KD),
      &          B1CHG(IG1,JG1,KG1),B2CHG(IG2,JG2,KG2),SBCHG(JD)
+      DIMENSION JSTB1(JG1+1),JENB1(JG1+1)
+      DIMENSION JSTB2(JG2+1),JENB2(JG2+1)
+      DIMENSION JSTSB(JD),JENSB(JD)
+      DIMENSION JSTB12(JG2+1),JENB12(JG2+1)
+      INTEGER IRR,KRR
 
       INTEGER T_TSTEP_MULTI, T_TSTEP_TIPGAP, T_TSTEP_FEXTRAP
       INTEGER T_TSTEP_DELTA, T_TSTEP_PITCH, T_TSTEP_MG
@@ -6546,27 +6551,86 @@ C
      & T_TSTEP_FINAL=30, T_TSTEP_PITCH2=31)
 C
 C******************************************************************************
-C     SET THE MULTIGRID CHANGES TO ZERO
+C     Pre-compute J ranges for MG AGG gather
 C
-      CALL TIMER_START(T_TSTEP_MULTI)
-      DO 110 K=1,NKB1
-      DO 110 J=1,NJB1+1
-      DO 110 I=1,NIB1
-      B1CHG(I,J,K) = 0.0
-  110 CONTINUE
-      DO 210 K=1,NKB2
-      DO 210 J=1,NJB2+1
-      DO 210 I=1,NIB2
-      B2CHG(I,J,K) = 0.0
-  210 CONTINUE
-      DO 310 J = 1,NSBLK
-      SBCHG(J) = 0.0
-  310 CONTINUE
-
-      CALL TIMER_STOP(T_TSTEP_MULTI)
-C*******************************************************************************
-C     BALANCE FLUXES ACROSS THE TIP GAP
+      IF(.NOT.(IR.LE.1.AND.JR.LE.1.AND.KR.LE.1)) THEN
+      DO J1=1,NJB1+1
+      JSTB1(J1) = 0
+      JENB1(J1) = 0
+      ENDDO
+      DO J=2,JM
+      J1 = JB1(J)
+      IF(JSTB1(J1).EQ.0) JSTB1(J1) = J
+      JENB1(J1) = J
+      ENDDO
+      DO J2=1,NJB2+1
+      JSTB2(J2) = 0
+      JENB2(J2) = 0
+      ENDDO
+      DO J=2,JM
+      J2 = JB2(J)
+      IF(JSTB2(J2).EQ.0) JSTB2(J2) = J
+      JENB2(J2) = J
+      ENDDO
+      DO JSB=1,NSBLK
+      JSTSB(JSB) = 0
+      JENSB(JSB) = 0
+      ENDDO
+      DO J=2,JM
+      JSB = JSBLK(J)
+      IF(JSTSB(JSB).EQ.0) JSTSB(JSB) = J
+      JENSB(JSB) = J
+      ENDDO
+C     Pre-compute J1 ranges for B2CHG gather from B1CHG
+      IRR = IRBB/IR
+      KRR = KRBB/KR
+      DO J2=1,NJB2+1
+      JSTB12(J2) = 0
+      JENB12(J2) = 0
+      ENDDO
+      DO J=2,JM
+      J1 = JB1(J)
+      J2 = JB2(J)
+      IF(JSTB12(J2).EQ.0.OR.J1.LT.JSTB12(J2))
+     & JSTB12(J2) = J1
+      IF(J1.GT.JENB12(J2)) JENB12(J2) = J1
+      ENDDO
+      END IF
 C
+C******************************************************************************
+C     Unified PARALLEL region: MG INIT + TIP GAP + FEXTRAP + DO 1000
+C     + PITCH AVG + MG AGG gather + STEP/DAMP + SA/PITCH + CELL->NODE
+C     + SMOOTH_VAR.  fork/join: 1/call (was 2).
+C
+C$OMP PARALLEL DEFAULT(NONE)
+C$OMP&PRIVATE(I,J,K,DELTA,RATPITCH,
+C$OMP&I1,I2,J1,J2,K1,K2,
+C$OMP&JSB,NR,ABSCHG,FDAMP,JCHANGE,
+C$OMP&FMULT,JS,JE,JAV,NSMTH,SFTVIS,
+C$OMP&FLOWDIRN,SUM_STORE,JP1,JP2,JM1,JMX,
+C$OMP&GSUM,FCDN,FCUP_J,
+C$OMP&SUM_B1,SUM_B2,SUM_SB,
+C$OMP&ISTART,IEND,KSTART,KEND,
+C$OMP&I1ST,I1EN,K1ST,K1EN,
+C$OMP&AVFLXJM1,AVFLXJP2,DFLUXJM1,DFLUXJP2,DFLUX)
+C$OMP&SHARED(STORE,STEP,RSTEP,B1CHG,B2CHG,SBCHG,
+C$OMP&STEP1,STEP2,STEPSBK,
+C$OMP&KB1,KB2,JB1,JB2,IB1,IB2,JSBLK,IMM1,JM,KMM1,
+C$OMP&NRSMTH,RSMTH,
+C$OMP&DAMP,NROWS,JSTART,JMIX,AVG_CHG,AVG_BLK,NROW,
+C$OMP&SUMCHG,JST,JEN,NSUM,
+C$OMP&D,NCALL,AVG,TURBVIS_DAMP,FP,SFT,FAC_SFVIS,
+C$OMP&NRWSM1,FLOWX,IMID,FEXTRAP,
+C$OMP&FACDWN,FACUP,FBL,FBR,FTL,FTR,IM,KM,
+C$OMP&XFLUX,TFLUX,RFLUX,SOURCE,DIFF,NBLADE,F1,F2,F3,
+C$OMP&KTIPS,KTIPE,
+C$OMP&IR,JR,KR,IRBB,KRBB,
+C$OMP&NIB1,NIB2,NKB1,NKB2,NJB1,NJB2,NSBLK,
+C$OMP&JSTB1,JENB1,JSTB2,JENB2,JSTSB,JENSB,
+C$OMP&JSTB12,JENB12,IRR,KRR)
+C
+C**** TIP GAP + FEXTRAP (SINGLE, tiny <0.02s) ****
+C$OMP SINGLE
       CALL TIMER_START(T_TSTEP_TIPGAP)
       DO 520 J=2,JM
       NR = NROW(J)
@@ -6578,11 +6642,6 @@ C
   520 CONTINUE
 
       CALL TIMER_STOP(T_TSTEP_TIPGAP)
-C
-C***********************************************************
-C     EXTRAPOLATE THE FLUXES ON THE UPSTREAM FACE OF THE MIXING PLANES. 
-C     UNLESS FEXTRAP = 0.0
-C 
       CALL TIMER_START(T_TSTEP_FEXTRAP)
       IF(FEXTRAP.LT.0.001) GO TO 4141
 
@@ -6626,21 +6685,13 @@ C
  4141 CONTINUE
 
       CALL TIMER_STOP(T_TSTEP_FEXTRAP)
-C*******************************************************************************
-C*******************************************************************************
-C      SUM THE FLUXES TO FORM CHANGE AND SAVE IT IN STORE(I,J,K) 
+C$OMP END SINGLE
 C
+C**** DO 1000: DELTA/STORE (element-independent) ****
+C$OMP MASTER
       CALL TIMER_START(T_TSTEP_DELTA)
-C
-C---- PARALLEL region 1: DO 1000 (DELTA/STORE) ----
-C     fork/join reduced: 4 per call -> 2 per call (split)
-C     DO 700, DO 1100 remain sequential (scatter pattern)
-C
-C$OMP PARALLEL DO DEFAULT(NONE) COLLAPSE(3)
-C$OMP&PRIVATE(I,J,K,RATPITCH,DELTA)
-C$OMP&SHARED(XFLUX,TFLUX,RFLUX,SOURCE,STORE,DIFF,
-C$OMP&NBLADE,F1,F2,F3,IMM1,JM,KMM1)
-C$OMP&SCHEDULE(STATIC)
+C$OMP END MASTER
+C$OMP DO SCHEDULE(STATIC)
       DO 1000 K=1,KMM1
       DO 1000 J=2,JM
       DO 1000 I=1,IMM1
@@ -6652,14 +6703,13 @@ C$OMP&SCHEDULE(STATIC)
       STORE(I,J,K)  = F1*DELTA + F2*DIFF(I,J,K)
       DIFF(I,J,K)   = DELTA    + F3*DIFF(I,J,K)
  1000 CONTINUE
-C$OMP END PARALLEL DO
-
+C$OMP END DO
+C$OMP MASTER
       CALL TIMER_STOP(T_TSTEP_DELTA)
+C$OMP END MASTER
 C
-C     PITCHWISE AVERAGE THE CHANGES AT ANY MIXING PLANES
-C     THIS IS ONLY DONE ON THE DOWNSTREAM FACE OF THE MIXING
-C     PLANE UNLESS FEXTRAP = 0 (BOTH SIDES AS IN TBLOCK-13).
-C
+C**** PITCH AVG at mixing planes (SINGLE, 0.02s) ****
+C$OMP SINGLE
       CALL TIMER_START(T_TSTEP_PITCH)
       DO 1750 NR = 1,NRWSM1
       J   = JMIX(NR)
@@ -6693,58 +6743,103 @@ C
  1750 CONTINUE
 
       CALL TIMER_STOP(T_TSTEP_PITCH)
+C$OMP END SINGLE
 C
-C     MG AGG: scatter to coarse grid (sequential)
+C**** MG AGG: gather to coarse grid (parallel) ****
+C$OMP MASTER
       CALL TIMER_START(T_TSTEP_MG)
+C$OMP END MASTER
       IF(.NOT.(IR.LE.1.AND.JR.LE.1.AND.KR.LE.1)) THEN
 C
-C      SUM THE ELEMENT CHANGES TO FORM THE CHANGES FOR THE
-C      MULTIGRID BLOCKS.
+C     B1CHG gather: coarse cells accumulate fine STORE
+C     I1 innermost (21 iters, stride-1 write) for vectorization
+C$OMP DO SCHEDULE(STATIC)
+      DO K1=1,NKB1
+        KSTART = (K1-1)*KR + 1
+        KEND = MIN(K1*KR, KMM1)
+        DO J1=1,NJB1+1
+          IF(JSTB1(J1).GT.0) THEN
+            DO I1=1,NIB1
+              ISTART = (I1-1)*IR + 1
+              IEND = MIN(I1*IR, IMM1)
+              SUM_B1 = 0.0
+              DO K=KSTART,KEND
+              DO J=JSTB1(J1),JENB1(J1)
+              DO I=ISTART,IEND
+                SUM_B1 = SUM_B1 + STORE(I,J,K)
+              ENDDO
+              ENDDO
+              ENDDO
+              B1CHG(I1,J1,K1) = SUM_B1
+            ENDDO
+          ELSE
+            DO I1=1,NIB1
+              B1CHG(I1,J1,K1) = 0.0
+            ENDDO
+          END IF
+        ENDDO
+      ENDDO
+C$OMP END DO
 C
-      DO 700 K=1,KMM1
-      K1 = KB1(K)
-      K2 = KB2(K)
-      DO 700 J=2,JM
-      JSB= JSBLK(J)
-      J1 = JB1(J)
-      J2 = JB2(J)
-      DO 700 I=1,IMM1
-      I1 = IB1(I)
-      I2 = IB2(I)
-      DELTA = STORE(I,J,K)
-      B1CHG(I1,J1,K1) = B1CHG(I1,J1,K1) + DELTA
-      B2CHG(I2,J2,K2) = B2CHG(I2,J2,K2) + DELTA
-      SBCHG(JSB)      = SBCHG(JSB)      + DELTA
-  700 CONTINUE
+C     B2CHG gather from B1CHG (0.2MB vs 5.6MB STORE)
+C$OMP DO SCHEDULE(STATIC)
+      DO K2=1,NKB2
+        K1ST = (K2-1)*KRR + 1
+        K1EN = MIN(K2*KRR, NKB1)
+        DO J2=1,NJB2+1
+          IF(JSTB12(J2).GT.0) THEN
+            DO I2=1,NIB2
+              I1ST = (I2-1)*IRR + 1
+              I1EN = MIN(I2*IRR, NIB1)
+              SUM_B2 = 0.0
+              DO K1=K1ST,K1EN
+              DO J1=JSTB12(J2),JENB12(J2)
+              DO I1=I1ST,I1EN
+                SUM_B2 = SUM_B2 + B1CHG(I1,J1,K1)
+              ENDDO
+              ENDDO
+              ENDDO
+              B2CHG(I2,J2,K2) = SUM_B2
+            ENDDO
+          ELSE
+            DO I2=1,NIB2
+              B2CHG(I2,J2,K2) = 0.0
+            ENDDO
+          END IF
+        ENDDO
+      ENDDO
+C$OMP END DO NOWAIT
+C
+C     SBCHG gather: superblock accumulation from STORE
+C     (SB boundaries don't align with B1/B2 coarsening)
+C$OMP DO SCHEDULE(STATIC)
+      DO JSB=1,NSBLK
+        IF(JSTSB(JSB).GT.0) THEN
+          SUM_SB = 0.0
+          DO K=1,KMM1
+          DO J=JSTSB(JSB),JENSB(JSB)
+C$OMP SIMD REDUCTION(+:SUM_SB)
+          DO I=1,IMM1
+            SUM_SB = SUM_SB + STORE(I,J,K)
+          ENDDO
+          ENDDO
+          ENDDO
+          SBCHG(JSB) = SUM_SB
+        ELSE
+          SBCHG(JSB) = 0.0
+        END IF
+      ENDDO
+C$OMP END DO
+C
       END IF
 C
+C$OMP MASTER
       CALL TIMER_STOP(T_TSTEP_MG)
       CALL TIMER_START(T_TSTEP_STEP)
-C
-C---- PARALLEL region 2: STEP/DAMP + SA/PITCH + CELL->NODE + SMOOTH ----
-C     Single PARALLEL region covering DO 1500 through SMOOTH_VAR.
-C     SA SPECIAL / PITCH AVG POST-MG run in SINGLE.
-C     CELL->NODE interior is C$OMP DO; boundary in SINGLE.
-C     SMOOTH_VAR uses orphaned C$OMP DO (all threads participate).
-C
-C$OMP PARALLEL DEFAULT(NONE)
-C$OMP&PRIVATE(I,J,K,DELTA,I1,I2,J1,J2,K1,K2,
-C$OMP&JSB,NR,ABSCHG,FDAMP,JCHANGE,
-C$OMP&FMULT,JS,JE,JAV,NSMTH,SFTVIS,
-C$OMP&FLOWDIRN,SUM_STORE,JP1,JMX,
-C$OMP&GSUM,FCDN,FCUP_J)
-C$OMP&SHARED(STORE,STEP,RSTEP,B1CHG,B2CHG,SBCHG,
-C$OMP&STEP1,STEP2,STEPSBK,
-C$OMP&KB1,KB2,JB1,JB2,IB1,IB2,JSBLK,IMM1,JM,KMM1,
-C$OMP&NRSMTH,RSMTH,
-C$OMP&DAMP,NROWS,JSTART,JMIX,AVG_CHG,AVG_BLK,NROW,
-C$OMP&SUMCHG,JST,JEN,NSUM,
-C$OMP&D,NCALL,AVG,TURBVIS_DAMP,FP,SFT,FAC_SFVIS,
-C$OMP&NRWSM1,FLOWX,IMID,FEXTRAP,
-C$OMP&FACDWN,FACUP,FBL,FBR,FTL,FTR,IM,KM)
+C$OMP END MASTER
 C
 C---- DO 1500: STEP (element-independent) ----
-C$OMP DO COLLAPSE(3) SCHEDULE(STATIC)
+C$OMP DO SCHEDULE(STATIC)
       DO 1500 K=1,KMM1
       DO 1500 J=2,JM
       DO 1500 I=1,IMM1
@@ -6785,7 +6880,7 @@ C$OMP SINGLE
       JCHANGE = JEN - JST  + 1
       NSUM = IMM1*KMM1*JCHANGE
 C$OMP END SINGLE
-C$OMP DO COLLAPSE(3) REDUCTION(+:SUMCHG) SCHEDULE(STATIC)
+C$OMP DO REDUCTION(+:SUMCHG) SCHEDULE(STATIC)
       DO 1502 K=1,KMM1
       DO 1502 J = JST, JEN
       DO 1502 I=1,IMM1
@@ -6816,7 +6911,7 @@ C$OMP SINGLE
 C$OMP END SINGLE
 C
 C---- DO 1525: DAMP (element-independent) ----
-C$OMP DO COLLAPSE(3) SCHEDULE(STATIC)
+C$OMP DO SCHEDULE(STATIC)
       DO 1525 K=1,KMM1
       DO 1525 J=2,JM
       DO 1525 I=1,IMM1
@@ -7078,7 +7173,7 @@ C$OMP END MASTER
 C
       END IF
 C
-C---- End of PARALLEL region 2 (expanded) ----
+C---- End of unified PARALLEL region ----
 C$OMP END PARALLEL
 C
 C*******************************************************************************

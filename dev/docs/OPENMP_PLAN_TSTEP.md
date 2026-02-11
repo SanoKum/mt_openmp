@@ -546,3 +546,201 @@ TSTEP の主要ループ合計: DELTA/STORE (2.6s) + STEP/DAMP (3.0s) + CELL->NO
    オーバーヘッドが 5（変数）× 複数ループ 分生じる。
    見通しが立ったら、TSTEP 内部全体を 1 つの `C$OMP PARALLEL` 領域として
    個別ループを `C$OMP DO` にするリファクタリングを検討。
+---
+
+## 7. MG AGG gather 変換 + 全 Region 単一 PARALLEL 統合
+
+### 7.1 現状と目標
+
+現在の TSTEP 構造（OMP=2 実測値、5変数×100ステップ合計）:
+
+```
+Region 1 fork ──────────────────────────── 500回
+  C$OMP PARALLEL DO: DO 1000 (DELTA/STORE)  2.74s
+Region 1 join ──────────────────────────── 500回
+  逐次: PITCH AVG (DO 1750)                 0.02s
+  逐次: MG AGG scatter (DO 700)             1.56s ← 最大の逐次ボトルネック
+Region 2 fork ──────────────────────────── 500回
+  C$OMP DO: DO 1500 (STEP)                  }
+  C$OMP SINGLE: SMOOTH_RESID                } 4.52s
+  C$OMP DO: DO 1502 (REDUCTION)             }
+  C$OMP DO: DO 1525 (DAMP)                  }
+  C$OMP SINGLE: SA SPECIAL / PITCH POST-MG  0.01s
+  C$OMP DO: CELL->NODE interior             } 1.63s
+  C$OMP SINGLE: CELL->NODE boundary         }
+  CALL SMOOTH_VAR(D) (orphaned)             4.40s
+Region 2 join ──────────────────────────── 500回
+```
+
+**目標**: Region 1 + 2 を単一 PARALLEL に統合し、MG AGG を gather 化して並列化。
+
+### 7.2 MG AGG scatter→gather 変換
+
+#### 問題: scatter パターンの書き込み競合
+
+現在の DO 700 は fine→coarse の scatter:
+```fortran
+      DO 700 K=1,KMM1        ← fine grid
+      DO 700 J=2,JM
+      DO 700 I=1,IMM1
+      B1CHG(IB1(I),JB1(J),KB1(K)) += STORE(I,J,K)  ← 衝突！
+      B2CHG(IB2(I),JB2(J),KB2(K)) += STORE(I,J,K)  ← 衝突！
+      SBCHG(JSBLK(J))             += STORE(I,J,K)  ← 衝突！
+```
+
+ATOMIC は Session 3 で壊滅的と判明（18倍遅化）。
+
+#### 解法: gather パターン（CELL->NODE と同じ手法）
+
+coarse セルを外側ループ、fine セルの合計を内側ループで計算:
+
+```fortran
+C     B1CHG gather: coarse (I1,J1,K1) ← sum of fine STORE
+C$OMP DO SCHEDULE(STATIC)
+      DO K1=1,NKB1
+      KSTART = (K1-1)*KR + 1
+      KEND = MIN(K1*KR, KMM1)
+      DO J1=1,NJB1
+      DO I1=1,NIB1
+      ISTART = (I1-1)*IR + 1
+      IEND = MIN(I1*IR, IMM1)
+      SUM_B1 = 0.0
+      DO K=KSTART,KEND
+      DO J=JSTB1(J1),JENB1(J1)
+      DO I=ISTART,IEND
+      SUM_B1 = SUM_B1 + STORE(I,J,K)
+      ENDDO; ENDDO; ENDDO
+      B1CHG(I1,J1,K1) = SUM_B1
+      ENDDO; ENDDO; ENDDO
+C$OMP END DO NOWAIT
+```
+
+- 各 coarse セルへの書き込みはスレッド間で独立 → **ATOMIC 不要**
+- inner ループは単純な合計 → **ベクトル化可能**
+- STORE の読み出しは連続アクセスパターン → **キャッシュフレンドリー**
+
+#### J 方向の逆マッピング
+
+I, K は単純な floor 除算: `ISTART = (I1-1)*IR + 1, IEND = min(I1*IR, IMM1)`
+
+J は mixing plane を考慮した不規則マッピング `JB1(J)` を使用。
+TSTEP 冒頭で `JSTB1(J1)`, `JENB1(J1)` を JB1(J) のスキャンで計算:
+
+```fortran
+C     Pre-compute J ranges for B1CHG gather
+      DO J1=1,NJB1+1
+        JSTB1(J1) = 0
+        JENB1(J1) = 0
+      ENDDO
+      DO J=2,JM
+        J1 = JB1(J)
+        IF(JSTB1(J1).EQ.0) JSTB1(J1) = J
+        JENB1(J1) = J
+      ENDDO
+```
+
+同様に B2CHG 用の JSTB2/JENB2、SBCHG 用の JSTSB/JENSB を計算。
+
+#### SBCHG の扱い
+
+SBCHG は NSBLK ≈ 8 要素の 1D 配列。gather ループも 8 イテレーション。
+`C$OMP DO` で並列化（2 スレッドなら各 4 イテレーション）:
+
+```fortran
+C$OMP DO SCHEDULE(STATIC)
+      DO JSB=1,NSBLK
+      SUM_SB = 0.0
+      DO K=1,KMM1
+      DO J=JSTSB(JSB),JENSB(JSB)
+      DO I=1,IMM1
+      SUM_SB = SUM_SB + STORE(I,J,K)
+      ENDDO; ENDDO; ENDDO
+      SBCHG(JSB) = SUM_SB
+      ENDDO
+C$OMP END DO
+```
+
+#### STORE の 3 パス読み出しについて
+
+scatter は 1 パスだが、gather は B1CHG/B2CHG/SBCHG で 3 パス。
+STORE は 63×350×63×4B ≈ 5.6MB で L3 キャッシュに収まるため、
+2 回目以降は L3 ヒットとなり追加コストは小さい。
+むしろ scatter の不規則書き込みによるキャッシュライン汚染が解消されるため、
+CELL->NODE と同様に **gather が scatter より高速になる可能性が高い**。
+
+### 7.3 全 Region 単一 PARALLEL 統合
+
+統合後のフロー:
+
+```
+C     Pre-compute J ranges for MG gather (sequential, O(JM))
+C
+C$OMP PARALLEL DEFAULT(NONE) ...     ←── 唯一の fork（500回）
+C$OMP MASTER: TIMER_START(DELTA)
+C$OMP DO:    MG INIT (B1CHG/B2CHG/SBCHG ゼロ化)
+C$OMP SINGLE: TIP GAP / FEXTRAP (0.02s, 微小)
+C$OMP DO:    DO 1000 DELTA/STORE (旧 Region 1)
+C$OMP MASTER: TIMER_STOP(DELTA), TIMER_START(PITCH)
+C$OMP SINGLE: PITCH AVG (DO 1750, 0.02s, 微小)
+C$OMP MASTER: TIMER_STOP(PITCH), TIMER_START(MG)
+C$OMP DO NOWAIT: B1CHG gather
+C$OMP DO NOWAIT: B2CHG gather
+C$OMP DO:        SBCHG gather (暗黙 BARRIER で全 gather 完了を保証)
+C$OMP MASTER: TIMER_STOP(MG), TIMER_START(STEP)
+C$OMP DO:    DO 1500 STEP
+C$OMP SINGLE: SMOOTH_RESID
+C$OMP DO:    DO 1502 REDUCTION
+C$OMP DO:    DO 1525 DAMP
+C$OMP MASTER: TIMER_STOP(STEP)
+C$OMP SINGLE: SA SPECIAL / PITCH AVG POST-MG
+C$OMP DO:    CELL->NODE interior
+C$OMP SINGLE: CELL->NODE boundary
+C$OMP MASTER: TIMER_START/STOP(SMOOTHVAR)
+      CALL SMOOTH_VAR(D) ← orphaned
+C$OMP END PARALLEL      ←── 唯一の join（500回）
+```
+
+**fork/join**: 2回/call → 1回/call（500回削減）
+
+### 7.4 NOWAIT の活用
+
+B1CHG gather と B2CHG gather は独立（読み STORE のみ、書き先が別配列）。
+`C$OMP END DO NOWAIT` で BARRIER を省略し、先に終わったスレッドが
+次の gather にすぐ入れる。最後の SBCHG gather で暗黙 BARRIER → DO 1500 安全。
+
+### 7.5 gfortran PARALLEL 劣化リスク
+
+SINGLE 内に入るコード:
+- TIP GAP: 0.00s（テストケース不使用）
+- FEXTRAP: 0.02s → 劣化しても無視可
+- PITCH AVG: 0.02s → 無視可
+- SMOOTH_RESID: 既に Region 2 内で SINGLE（変更なし）
+- SA SPECIAL: 0.00s（テストケース不使用）
+- PITCH AVG POST-MG: 0.008s → 無視可
+- CELL->NODE boundary: ~0.1s
+
+**MG AGG は C$OMP DO（並列）なので劣化なし。**
+
+### 7.6 期待効果
+
+| 項目 | 改善量 (OMP=2) |
+|---|---|
+| MG AGG 並列化 | 1.56s → ~0.8s (-0.76s) |
+| MG AGG gather 高速化 | 追加改善（キャッシュ効果） |
+| fork/join 500回削減 | ~0.1s（gfortran では小さい） |
+| **合計** | **~1.0s 改善** |
+
+### 7.7 追加 PRIVATE/SHARED 変数
+
+PARALLEL ディレクティブに追加が必要:
+
+PRIVATE 追加:
+- `RATPITCH` (DO 1000)
+- `SUM_B1, SUM_B2, SUM_SB` (MG gather)
+- `ISTART, IEND, KSTART, KEND` (MG gather range)
+
+SHARED 追加:
+- `XFLUX, TFLUX, RFLUX, SOURCE, DIFF, NBLADE, F1, F2, F3` (DO 1000)
+- `IR, KR, NIB1, NIB2, NKB1, NKB2, NSBLK` (MG gather)
+- `JSTB1, JENB1, JSTB2, JENB2, JSTSB, JENSB` (J range arrays)
+- `IRBB, KRBB` (B2CHG gather)

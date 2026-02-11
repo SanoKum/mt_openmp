@@ -8,13 +8,20 @@ FFLAGS = -fopenmp -O3 -ffast-math -funroll-loops -march=native -mtune=native \
 FFLAGS_ORIG = -O3 -ffast-math -funroll-loops -march=native -mtune=native \
 	-ffixed-line-length-none -mcmodel=large
 VECFLAGS = -fopt-info-vec-optimized=vec.log -fopt-info-vec-missed=vec.log
+
+# Intel ifx compiler settings
+FC_IFX = ifx
+BIN_IFX = ../bin/multall-open21.3-s-ifx
+FFLAGS_IFX = -qopenmp -O2 -xHost -fixed -extend-source -mcmodel=large
+VECFLAGS_IFX = -qopt-report=3 -qopt-report-file=vec-ifx.log
+
 RUN_DIR = ../test_cases
 INPUT = two-stg-LP-ST+steam.dat
 OUT_OMP2 = run_smoothvar_omp2.out
 STAGE_LOG = stage.log
 OMP_ENV = OMP_PROC_BIND=true OMP_PLACES=cores OMP_WAIT_POLICY=PASSIVE
 
-.PHONY: build build_original run_omp2 clean
+.PHONY: build build_original build_ifx run_omp2 clean
 
 build: $(BIN)
 
@@ -27,7 +34,12 @@ $(BIN_ORIG): $(SRC_ORIG)
 	$(FC) $(FFLAGS_ORIG) $(VECFLAGS) -o $@ $<
 
 clean:
-	rm -f $(BIN) $(BIN_ORIG) vec.log
+	rm -f $(BIN) $(BIN_ORIG) $(BIN_IFX) vec.log vec-ifx.log
+
+build_ifx: $(BIN_IFX)
+
+$(BIN_IFX): $(SRC)
+	$(FC_IFX) $(FFLAGS_IFX) $(VECFLAGS_IFX) -o $@ $<
 
 run_omp2: $(BIN)
 	cd $(RUN_DIR) && $(OMP_ENV) ../bin/$(notdir $(BIN)) < $(INPUT) > $(OUT_OMP2)
