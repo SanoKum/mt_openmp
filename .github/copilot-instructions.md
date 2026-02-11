@@ -165,3 +165,87 @@ cd dev/test_cases && OMP_NUM_THREADS=2 OMP_PROC_BIND=true OMP_PLACES=cores \
   - 変更内容（並列化手法、SIMD 適用など）
   - 結果（速度変化、成功/失敗、原因分析）
   - 次のアクション
+
+---
+
+## 8. AWS ベンチマーク手順
+
+### 8.1 サーバー情報
+
+- **インスタンス**: AWS EC2 c7i（Intel Xeon Platinum 8488C, 8 物理コア / 16 vCPU）
+- **SSH 設定**: `~/.ssh/config` に `Host ec2-c7i` として登録（IP はインスタンス起動ごとに変わるため都度更新）
+- **OS**: Ubuntu 24.04, gfortran 13.3.0
+- **AWS 上のパス**: `~/MULTALL-project/dev/`（ローカルと同じ構造）
+
+### 8.2 環境構築（新規インスタンス起動時）
+
+```bash
+# 1. SSH config の HostName を新しい IP に更新
+vi ~/.ssh/config
+
+# 2. ビルドツールのインストール
+ssh ec2-c7i "sudo apt-get update -qq && sudo apt-get install -y -qq gfortran make"
+
+# 3. ディレクトリ作成
+ssh ec2-c7i "mkdir -p ~/MULTALL-project/dev/{src,bin,test_cases,scripts}"
+
+# 4. ファイル転送
+cd ~/work/MULTALL-project
+scp dev/src/multall-open21.3-s1.0.f dev/src/multall-open-21.3.f \
+    dev/src/commall-open-21.3 dev/src/Makefile \
+    ec2-c7i:~/MULTALL-project/dev/src/
+
+scp dev/test_cases/two-stg-LP-ST+steam.dat dev/test_cases/intype \
+    dev/test_cases/mixbconds \
+    ec2-c7i:~/MULTALL-project/dev/test_cases/
+
+scp original/test_cases/props_table.dat original/test_cases/stopit \
+    ec2-c7i:~/MULTALL-project/dev/test_cases/
+
+scp dev/scripts/run_100stp_benchmark.sh dev/scripts/diff_stage_logs.sh \
+    ec2-c7i:~/MULTALL-project/dev/scripts/
+
+# 5. コンパイル（OpenMP 版 + オリジナル版）
+ssh ec2-c7i "cd ~/MULTALL-project/dev/src && make build"
+ssh ec2-c7i "cd ~/MULTALL-project/dev/src && make build_original"
+```
+
+### 8.3 ベンチマーク実行
+
+original バイナリは `/dev/tty` を開いて Y/N プロンプトを出すため、
+**ユーザーが AWS に SSH して直接実行する**（非対話 SSH ではプロンプトが動作しない）。
+
+```bash
+# AWS に SSH 接続
+ssh ec2-c7i
+
+# ベンチマークスクリプトを実行
+cd ~/MULTALL-project/dev/test_cases
+bash ~/MULTALL-project/dev/scripts/run_100stp_benchmark.sh
+# → original の Y/N プロンプトには Y を入力
+# → original, OMP=1, 2, 4, 8 の順に実行される
+# → 最後に LOOP: TOTAL のサマリーが表示される
+```
+
+### 8.4 結果の回収と評価
+
+```bash
+# ローカルから stage.log を回収
+scp ec2-c7i:~/MULTALL-project/dev/test_cases/stage.log.aws_* \
+    dev/test_cases/
+
+# LOOP: TOTAL で速度向上量を評価
+grep "LOOP: TOTAL" dev/test_cases/stage.log.aws_*
+```
+
+評価基準:
+- **LOOP: TOTAL** の original → OMP=8 での倍率（スケーリング）で速度向上を評価する。ステップ数が少ない（100ステップ）ため、MAIN: TOTAL にはセットアップ時間が含まれ正確な比較にならない。**常に LOOP: TOTAL を基準とする**。
+- セクション別の内訳で並列化効果を確認（特に新規並列化セクション）
+- **数値検証**: original と OMP=1 の `stage.log` を比較し、EMAX/EAVG/ECONT/FLOW の値が大きく変化していないことを確認する。last-digit の浮動小数点差（例: 0.22094 vs 0.22093）のみ許容。桁が変わるような差異があれば並列化のバグを疑う。
+
+### 8.5 注意事項
+
+- AWS インスタンスは **使い終わったら停止する**（課金防止）。
+- IP アドレスはインスタンス起動ごとに変わるため、`~/.ssh/config` の `HostName` を都度更新すること。
+- ベンチマーク中は他のプロセスを同時に実行しない（タイミング精度のため）。
+- `OMP_PROC_BIND=true OMP_PLACES=cores OMP_WAIT_POLICY=PASSIVE` を必ず設定する。
