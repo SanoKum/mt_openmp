@@ -588,3 +588,49 @@ Session 4 で判明: gfortran は PARALLEL 領域内の逐次コード（SINGLE/
 2. **orphaned worksharing はこの問題を回避できる** — SMOOTH_VAR 内の `C$OMP DO` は別翻訳単位として最適化される。
 3. **ATOMIC は小配列への高頻度衝突で壊滅的** — DO 1100 scatter で 22 倍遅化。
 4. **scatter→gather + interior/boundary 分離で scatter より 40% 高速** — IF 排除がキー。
+
+---
+
+## セッション 7: MOM FLUX BUILD 統合 PARALLEL + SIMD
+
+### 実施内容
+
+#### 1. PARALLEL DO → 統合 PARALLEL リージョン（10→3 fork/join）
+
+MOM FLUX BUILD の 10 個の `C$OMP PARALLEL DO` を 3 方向ごとに 1 つの `C$OMP PARALLEL` リージョンに統合。fork/join 回数を 10→3 に削減。
+
+- **Axial（軸方向）**: DO 6100, 6110, 6120 → 1 PARALLEL + 3 DO + SINGLE（TFLOW, coolant/periodic/shroud）
+- **Tangential（周方向）**: DO 6200, 6210, 6230 → 1 PARALLEL + 3 DO + SINGLE（TFLOW, periodic/coolant/shroud）
+- **Radial（径方向）**: DO 6300, 6310, 6320, 6330 → 1 PARALLEL + 4 DO + SINGLE（TFLOW, coolant/periodic/shroud）
+
+| 構成 | OMP=1 | OMP=2 | OMP=4 |
+|------|-------|-------|-------|
+| 統合前（10 PARALLEL DO） | 55.66s | 45.60s | 41.57s |
+| 統合後（3 PARALLEL） | 54.95s | 45.87s | 42.36s |
+
+- OMP=1: -0.71s（fork/join オーバーヘッド削減）
+
+#### 2. C$OMP SIMD 追加（10 ループ内側 I ループ）
+
+10 個の内側 I ループすべてに `C$OMP SIMD` ディレクティブを追加。
+
+| 構成 | OMP=1 | OMP=4 | MOM FLUX (OMP=4) |
+|------|-------|-------|------------------|
+| SIMD なし | 54.95s | 42.36s | 3.58s |
+| SIMD あり | 51.48s | 40.87s | 3.38s |
+
+- OMP=1: **-3.47s** の大幅改善（LOOP TOTAL: 39.68→36.84s）
+- OMP=4: **-1.49s** 改善
+- MOM FLUX 自体は -0.20s だが、他ループへの波及効果あり
+
+#### 3. 累計性能（original 59.35s 比）
+
+| スレッド数 | 今回 | 改善率 |
+|-----------|------|--------|
+| OMP=1 | 51.48s | -13.3% |
+| OMP=4 | 40.87s | **-31.1%** |
+
+### 保存ログ
+
+- `stage.log.merge_omp1/2/4` — 統合 PARALLEL（SIMD なし）
+- `stage.log.simd_omp1/4` — 統合 PARALLEL + SIMD
