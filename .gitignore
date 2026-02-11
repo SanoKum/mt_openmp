@@ -1,6 +1,9 @@
 # Ignore upstream repository copy
 /multall-open/
 
+# Ignore original reference copy (keep local only)
+/original/
+
 # Built binaries
 /original/bin/
 /dev/bin/
