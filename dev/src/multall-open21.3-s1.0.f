@@ -6721,18 +6721,27 @@ C
       CALL TIMER_STOP(T_TSTEP_MG)
       CALL TIMER_START(T_TSTEP_STEP)
 C
-C---- PARALLEL region 2: DO 1500 + DAMP ----
-C     Combines 3 former PARALLEL DO into 1 PARALLEL
+C---- PARALLEL region 2: STEP/DAMP + SA/PITCH + CELL->NODE + SMOOTH ----
+C     Single PARALLEL region covering DO 1500 through SMOOTH_VAR.
+C     SA SPECIAL / PITCH AVG POST-MG run in SINGLE.
+C     CELL->NODE interior is C$OMP DO; boundary in SINGLE.
+C     SMOOTH_VAR uses orphaned C$OMP DO (all threads participate).
 C
 C$OMP PARALLEL DEFAULT(NONE)
 C$OMP&PRIVATE(I,J,K,DELTA,I1,I2,J1,J2,K1,K2,
-C$OMP&JSB,NR,ABSCHG,FDAMP,JCHANGE)
+C$OMP&JSB,NR,ABSCHG,FDAMP,JCHANGE,
+C$OMP&FMULT,JS,JE,JAV,NSMTH,SFTVIS,
+C$OMP&FLOWDIRN,SUM_STORE,JP1,JMX,
+C$OMP&GSUM,FCDN,FCUP_J)
 C$OMP&SHARED(STORE,STEP,RSTEP,B1CHG,B2CHG,SBCHG,
 C$OMP&STEP1,STEP2,STEPSBK,
 C$OMP&KB1,KB2,JB1,JB2,IB1,IB2,JSBLK,IMM1,JM,KMM1,
 C$OMP&NRSMTH,RSMTH,
 C$OMP&DAMP,NROWS,JSTART,JMIX,AVG_CHG,AVG_BLK,NROW,
-C$OMP&SUMCHG,JST,JEN,NSUM)
+C$OMP&SUMCHG,JST,JEN,NSUM,
+C$OMP&D,NCALL,AVG,TURBVIS_DAMP,FP,SFT,FAC_SFVIS,
+C$OMP&NRWSM1,FLOWX,IMID,FEXTRAP,
+C$OMP&FACDWN,FACUP,FBL,FBR,FTL,FTR,IM,KM)
 C
 C---- DO 1500: STEP (element-independent) ----
 C$OMP DO COLLAPSE(3) SCHEDULE(STATIC)
@@ -6821,15 +6830,18 @@ C$OMP END DO
 C
       END IF
 C
-C---- End of PARALLEL region 2 ----
-C$OMP END PARALLEL
+C
+C---- Timer: end STEP/DAMP section (master thread only) ----
+C$OMP MASTER
+      CALL TIMER_STOP(T_TSTEP_STEP)
+C$OMP END MASTER
 C
 C*****************************************************************************
-C   NEXT IS SPECIAL TREATMENT FOR THE TURBULENT VISCOSITY
-C   IF USING THE SA MODEL
+C   SA SPECIAL (NCALL=2) or PITCH AVG POST-MG (NCALL!=2)
+C   Both run in SINGLE — 0.00s and 0.008s respectively.
+C*****************************************************************************
 C
-      CALL TIMER_STOP(T_TSTEP_STEP)
-
+C$OMP SINGLE
       IF(NCALL.EQ.2) THEN
       CALL TIMER_START(T_TSTEP_SA_SPECIAL)
 C  
@@ -6867,20 +6879,12 @@ C
       SFTVIS  = FAC_SFVIS*SFT
       CALL SMOOTH_RESID(D,SFTVIS,NSMTH)
 C
-C     JUMP TO 8700 FOR THE TURBULENT VISCOSITY ONLY
       CALL TIMER_STOP(T_TSTEP_SA_SPECIAL)
-      GO TO 8700
 C
-C   END OF SPECIAL TREATMENT FOR THE TURBULENT VISCOSITY
-C
-      END IF
+      ELSE
 C
 C**************************************************************************************
-C**************************************************************************************
-C     AGAIN PITCHWISE AVERAGE THE CHANGES AT ANY MIXING PLANES AFTER INCLUDING 
-C     MULTIGRID AND MULTIPLYING BY THE TIMESTEP. 
-C     THIS IS ONLY DONE ON THE DOWNSTREAM FACE OF THE MIXING PLANE UNLESS  FEXTRAP = 0
-C     IN WHICH CASE IT IS DONE ON BOTH SIDES AS IN TBLOCK-13.
+C     PITCHWISE AVERAGE THE CHANGES AT MIXING PLANES (POST-MG)
 C
       CALL TIMER_START(T_TSTEP_PITCH2)
       DO 1850 NR = 1,NRWSM1
@@ -6916,26 +6920,27 @@ C
  1890 CONTINUE
 C
  1850 CONTINUE
-
       CALL TIMER_STOP(T_TSTEP_PITCH2)
 C
+      END IF
+C$OMP END SINGLE
+C
 C****************************************************************************
-C****************************************************************************
-C          ADD THE CHANGES TO THE OLD VALUE OF THE VARIABLE D
-C              DISTRIBUTING THE CHANGES TO THE FOUR CORNERS
-C              WITH DOUBLE WEIGHTING AT THE BOUNDARIES.
-C              THE FACTOR OF 1/8 IS INCLUDED IN THE 'FMI' TERMS.
+C     CELL->NODE and SMOOTH_VAR: skip entirely for NCALL==2 (SA model)
+C     NCALL is SHARED so all threads take the same branch.
 C****************************************************************************
 C
+      IF(NCALL.NE.2) THEN
+C
+C$OMP MASTER
       CALL TIMER_START(T_TSTEP_CELLNODE)
+C$OMP END MASTER
 C
-C---- CELL->NODE: gather transformation ----
+C---- CELL->NODE: gather transformation (Phase 1: interior = parallel) ----
 C     Each node gathers contributions from surrounding cells.
-C     Thread-safe (no write conflicts) for parallelization.
+C     No write conflicts — safe for C$OMP DO.
 C
-C     Phase 1: Interior nodes (I=2..IMM1, J=2..JM-1, K=2..KMM1)
-C     All 8 contributions exist. FCDN/FCUP_J factored out.
-C
+C$OMP DO SCHEDULE(STATIC)
       DO K=2,KMM1
       DO J=2,JM-1
       FCDN = FACDWN(J)
@@ -6953,10 +6958,11 @@ C
       ENDDO
       ENDDO
       ENDDO
+C$OMP END DO
 C
-C     Phase 2: Boundary faces only (3 non-overlapping pairs)
-C     K faces: 2*IM*JM, I faces: 2*JM*(KM-2),
-C     J faces: 2*(IM-2)*(KM-2).  Total ~111K vs 1.84M before.
+C---- CELL->NODE: Phase 2 — boundary faces (sequential, SINGLE) ----
+C
+C$OMP SINGLE
 C
 C     --- K=1 and K=KM faces (all I, all J) ---
       DO K=1,KM,KM-1
@@ -7053,25 +7059,30 @@ C     --- J=1 and J=JM faces (I=2..IMM1, K=2..KMM1 interior) ---
       ENDDO
       ENDDO
       ENDDO
-
+C
+C$OMP END SINGLE
+C
+C$OMP MASTER
       CALL TIMER_STOP(T_TSTEP_CELLNODE)
-C
-C************************************************************************************
-C************************************************************************************
-C    CALLL  "SMOOTHVAR" TO APPLY THE SMOOTHING (ARTIFICIAL VISCOSITY) TO THE VARIABLE "D". 
-C
       CALL TIMER_START(T_TSTEP_SMOOTHVAR)
-C---- Region 3: SMOOTH_VAR with orphaned worksharing ----
-C     SMOOTH_VAR uses C$OMP DO internally (orphaned).
-C     This single PARALLEL region replaces 8 internal fork/join.
-C$OMP PARALLEL DEFAULT(NONE) SHARED(D)
+C$OMP END MASTER
+C
+C---- SMOOTH_VAR: orphaned worksharing (all threads participate) ----
+C     SMOOTH_VAR uses C$OMP DO internally — do NOT wrap in SINGLE.
+C
       CALL SMOOTH_VAR(D)
-C$OMP END PARALLEL
+C
+C$OMP MASTER
       CALL TIMER_STOP(T_TSTEP_SMOOTHVAR)
+C$OMP END MASTER
+C
+      END IF
+C
+C---- End of PARALLEL region 2 (expanded) ----
+C$OMP END PARALLEL
 C
 C*******************************************************************************
 C*******************************************************************************
-C    RE ENTER HERE IF NCALL = 2 FOR THE TURBULENT VISCOSITY.
  8700 CONTINUE
 C*******************************************************************************
 C*******************************************************************************
