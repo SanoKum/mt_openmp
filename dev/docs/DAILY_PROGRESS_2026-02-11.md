@@ -634,3 +634,77 @@ MOM FLUX BUILD の 10 個の `C$OMP PARALLEL DO` を 3 方向ごとに 1 つの 
 
 - `stage.log.merge_omp1/2/4` — 統合 PARALLEL（SIMD なし）
 - `stage.log.simd_omp1/4` — 統合 PARALLEL + SIMD
+
+---
+
+## セッション 3: VISCOUS/TURB MODEL 並列化（SUBROUTINE LOSS）
+
+### 実施内容
+
+1. **計画策定**: `OPENMP_PLAN_VISCOUS.md` を作成。VLAM/VTURB の COMMON 競合、VISC_RAT 書き込み順序、WALLFUN スレッド安全性を分析。
+
+2. **試行1: 2つの PARALLEL DO**
+   - DO 50（streamwise）と DO 100（bladewise）にそれぞれ `C$OMP PARALLEL DO` を付与
+   - 結果: OMP=4 で **3.50s**（元 2.93s より悪化）
+   - 原因: fork/join オーバーヘッド（2×20回 = 40回、各~15ms）
+
+3. **試行2: 統一 PARALLEL リージョン** ← 採用
+   - 1つの `C$OMP PARALLEL` + 2つの `C$OMP DO` に統合
+   - `IF(KM.EQ.2) GO TO 555` を PARALLEL 領域外に移動（安全性のため）
+   - VLAM/VTURB → VLAM_L/VTURB_L ローカル配列に置換（COMMON 競合回避）
+   - FIRSTPRIVATE(VISLAM,TCOND,FTCOND): REYNO<0.0001 パスで条件変更されるため
+   - 結果: OMP=4 で **1.41s**（元 2.93s → 2.1x スケーリング）
+   - 数値出力: baseline と完全一致
+
+4. **試行3: DO 30 ループ分割 + C$OMP SIMD**
+   - K方向ループを K=1〜KMID と K=KMID+1〜KM に分割して IF 分岐を除去
+   - 結果: ベクトル化されず（"complicated access pattern" — K方向 stride 22,464）
+   - 性能変化なし → **リバート**
+
+### 結果サマリ
+
+| 項目 | Original | OMP=4 現在 | 改善 |
+|------|----------|-----------|------|
+| VISCOUS/TURB | 3.02s | 1.41s | -1.61s (2.1x) |
+| LOOP TOTAL | 43.01s | 24.71s | -18.30s (1.74x) |
+| MAIN TOTAL | 59.35s | 40.35s | -19.01s (1.47x) |
+
+### 全セクション Original vs OMP=4 比較
+
+| セクション | Original(s) | OMP=4(s) | 削減 | スケール | 状態 |
+|---|---|---|---|---|---|
+| MOM FLUX BUILD | 4.44 | 3.47 | -0.97 | 1.3x | 並列化済（メモリ律速） |
+| SMOOTH_VAR | 7.65 | 2.89 | -4.76 | 2.6x | 並列化済 |
+| DELTA/STORE | 2.65 | 2.12 | -0.54 | 1.3x | シリアル（試行で悪化） |
+| PRESSURE/TEMP | 7.61 | 1.87 | -5.75 | 4.1x | 並列化済 |
+| ENERGY (TSTEP) | 3.78 | 1.84 | -1.94 | 2.1x | 並列化済 |
+| MOM-X (TSTEP) | 3.75 | 1.84 | -1.90 | 2.0x | 並列化済 |
+| MOM-T (TSTEP) | 3.77 | 1.82 | -1.95 | 2.1x | 並列化済 |
+| MOM-R (TSTEP) | 3.75 | 1.80 | -1.95 | 2.1x | 並列化済 |
+| DENSITY (TSTEP) | 3.73 | 1.78 | -1.95 | 2.1x | 並列化済 |
+| MASS FLUX | 1.69 | 1.70 | +0.02 | 1.0x | **シリアル** |
+| CELL→NODE | 3.45 | 1.56 | -1.90 | 2.2x | 並列化済 |
+| STEP/DAMP | 3.14 | 1.52 | -1.62 | 2.1x | 並列化済 |
+| VISCOUS/TURB | 3.02 | 1.41 | -1.61 | 2.1x | 並列化済 |
+| ENERGY FLUX/SOURCE | 1.10 | 1.13 | +0.03 | 1.0x | **シリアル** |
+| MG AGG | 1.60 | 0.81 | -0.79 | 2.0x | 並列化済 |
+| VELOCITY UPDATE | 0.68 | 0.65 | -0.03 | 1.1x | 並列化済 |
+| MASS FLUX RFLUX | 0.49 | 0.48 | -0.01 | 1.0x | シリアル |
+
+### 学んだこと
+
+- K方向ループは stride IM×JM で SIMD 化不可能。I方向（stride-1）にするには大規模リファクタが必要。
+- 2つの PARALLEL DO → 1つの PARALLEL + 2つの DO 統合で fork/join 削減が非常に効果的。
+- WALLFUN は引数のみの I/O で COMMON 書き込みなし → スレッドセーフ。
+
+### 保存ログ
+
+- `stage.log.viscous_omp1` — 2つの PARALLEL DO, OMP=1
+- `stage.log.viscous_omp2` — 2つの PARALLEL DO, OMP=2
+- `stage.log.viscous_omp4` — 2つの PARALLEL DO, OMP=4
+- `stage.log.viscous_unified_omp4` — 統一 PARALLEL, OMP=4（採用版）
+
+### 次のアクション
+
+- MASS FLUX（1.70s、シリアル）の並列化に着手
+- ENERGY FLUX/SOURCE（1.13s、シリアル）も候補
