@@ -6665,10 +6665,12 @@ C
       INTEGER T_TSTEP_DELTA, T_TSTEP_PITCH, T_TSTEP_MG
       INTEGER T_TSTEP_STEP, T_TSTEP_SA_SPECIAL, T_TSTEP_CELLNODE
       INTEGER T_TSTEP_SMOOTHVAR, T_TSTEP_FINAL, T_TSTEP_PITCH2
+      INTEGER T_TSTEP_CN_PH1, T_TSTEP_CN_PH2
       PARAMETER (T_TSTEP_MULTI=20, T_TSTEP_TIPGAP=21, T_TSTEP_FEXTRAP=22,
      & T_TSTEP_DELTA=23, T_TSTEP_PITCH=24, T_TSTEP_MG=25, T_TSTEP_STEP=26,
      & T_TSTEP_SA_SPECIAL=27, T_TSTEP_CELLNODE=28, T_TSTEP_SMOOTHVAR=29,
-     & T_TSTEP_FINAL=30, T_TSTEP_PITCH2=31)
+     & T_TSTEP_FINAL=30, T_TSTEP_PITCH2=31,
+     & T_TSTEP_CN_PH1=56, T_TSTEP_CN_PH2=57)
 C
 C******************************************************************************
 C     Pre-compute J ranges for MG AGG gather
@@ -7155,129 +7157,157 @@ C---- CELL->NODE: gather transformation (Phase 1: interior = parallel) ----
 C     Each node gathers contributions from surrounding cells.
 C     No write conflicts — safe for C$OMP DO.
 C
+C$OMP MASTER
+      CALL TIMER_START(T_TSTEP_CN_PH1)
+C$OMP END MASTER
 C$OMP DO SCHEDULE(STATIC)
       DO K=2,KMM1
-      DO J=2,JM-1
-      FCDN = FACDWN(J)
-      FCUP_J = FACUP(J+1)
-      DO I=2,IMM1
-      GSUM = (STORE(I,J,K)*FBL(I,K)
-     &      + STORE(I-1,J,K)*FBR(I-1,K)
-     &      + STORE(I,J,K-1)*FTL(I,K-1)
-     &      + STORE(I-1,J,K-1)*FTR(I-1,K-1))*FCDN
-     &     + (STORE(I,J+1,K)*FBL(I,K)
-     &      + STORE(I-1,J+1,K)*FBR(I-1,K)
-     &      + STORE(I,J+1,K-1)*FTL(I,K-1)
-     &      + STORE(I-1,J+1,K-1)*FTR(I-1,K-1))*FCUP_J
-      D(I,J,K) = D(I,J,K) + GSUM
+        DO J=2,JM-1
+          FCDN = FACDWN(J)
+          FCUP_J = FACUP(J+1)
+          DO I=2,IMM1
+            GSUM = (STORE(I,J,K)*FBL(I,K)
+     &            + STORE(I-1,J,K)*FBR(I-1,K)
+     &            + STORE(I,J,K-1)*FTL(I,K-1)
+     &            + STORE(I-1,J,K-1)*FTR(I-1,K-1))*FCDN
+     &           + (STORE(I,J+1,K)*FBL(I,K)
+     &            + STORE(I-1,J+1,K)*FBR(I-1,K)
+     &            + STORE(I,J+1,K-1)*FTL(I,K-1)
+     &            + STORE(I-1,J+1,K-1)*FTR(I-1,K-1))*FCUP_J
+            D(I,J,K) = D(I,J,K) + GSUM
+          ENDDO
+        ENDDO
       ENDDO
+C$OMP END DO
+C$OMP MASTER
+      CALL TIMER_STOP(T_TSTEP_CN_PH1)
+      CALL TIMER_START(T_TSTEP_CN_PH2)
+C$OMP END MASTER
+C
+C---- CELL->NODE: Phase 2 — boundary faces (parallel, no conflicts) ----
+C     Each face writes to non-overlapping D locations → all NOWAIT safe.
+C
+C$OMP BARRIER
+C     --- K=1 face (all I, all J): only FBL/FBR terms ---
+C$OMP DO SCHEDULE(STATIC)
+      DO J=1,JM
+        DO I=1,IM
+          GSUM = 0.0
+          IF(J.GE.2) THEN
+            FCDN = FACDWN(J)
+            IF(I.LE.IMM1)
+     &        GSUM = GSUM + STORE(I,J,1)*FBL(I,1)*FCDN
+            IF(I.GE.2)
+     &        GSUM = GSUM + STORE(I-1,J,1)*FBR(I-1,1)*FCDN
+          END IF
+          IF(J.LE.JM-1) THEN
+            FCUP_J = FACUP(J+1)
+            IF(I.LE.IMM1)
+     &        GSUM = GSUM + STORE(I,J+1,1)*FBL(I,1)*FCUP_J
+            IF(I.GE.2)
+     &        GSUM = GSUM
+     &        + STORE(I-1,J+1,1)*FBR(I-1,1)*FCUP_J
+          END IF
+          D(I,J,1) = D(I,J,1) + GSUM
+        ENDDO
       ENDDO
+C$OMP END DO NOWAIT
+C     --- K=KM face (all I, all J): only FTL/FTR terms ---
+C$OMP DO SCHEDULE(STATIC)
+      DO J=1,JM
+        DO I=1,IM
+          GSUM = 0.0
+          IF(J.GE.2) THEN
+            FCDN = FACDWN(J)
+            IF(I.LE.IMM1)
+     &        GSUM = GSUM + STORE(I,J,KMM1)*FTL(I,KMM1)*FCDN
+            IF(I.GE.2)
+     &        GSUM = GSUM
+     &        + STORE(I-1,J,KMM1)*FTR(I-1,KMM1)*FCDN
+          END IF
+          IF(J.LE.JM-1) THEN
+            FCUP_J = FACUP(J+1)
+            IF(I.LE.IMM1)
+     &        GSUM = GSUM
+     &        + STORE(I,J+1,KMM1)*FTL(I,KMM1)*FCUP_J
+            IF(I.GE.2)
+     &        GSUM = GSUM
+     &        + STORE(I-1,J+1,KMM1)*FTR(I-1,KMM1)*FCUP_J
+          END IF
+          D(I,J,KM) = D(I,J,KM) + GSUM
+        ENDDO
+      ENDDO
+C$OMP END DO NOWAIT
+C
+C     --- I=1 face (all J, K=2..KMM1): only FBL/FTL terms ---
+C$OMP DO SCHEDULE(STATIC)
+      DO K=2,KMM1
+        DO J=1,JM
+          GSUM = 0.0
+          IF(J.GE.2) THEN
+            FCDN = FACDWN(J)
+            GSUM = GSUM + STORE(1,J,K)*FBL(1,K)*FCDN
+     &                   + STORE(1,J,K-1)*FTL(1,K-1)*FCDN
+          END IF
+          IF(J.LE.JM-1) THEN
+            FCUP_J = FACUP(J+1)
+            GSUM = GSUM + STORE(1,J+1,K)*FBL(1,K)*FCUP_J
+     &                   + STORE(1,J+1,K-1)*FTL(1,K-1)*FCUP_J
+          END IF
+          D(1,J,K) = D(1,J,K) + GSUM
+        ENDDO
+      ENDDO
+C$OMP END DO NOWAIT
+C     --- I=IM face (all J, K=2..KMM1): only FBR/FTR terms ---
+C$OMP DO SCHEDULE(STATIC)
+      DO K=2,KMM1
+        DO J=1,JM
+          GSUM = 0.0
+          IF(J.GE.2) THEN
+            FCDN = FACDWN(J)
+            GSUM = GSUM + STORE(IMM1,J,K)*FBR(IMM1,K)*FCDN
+     &                   + STORE(IMM1,J,K-1)*FTR(IMM1,K-1)*FCDN
+          END IF
+          IF(J.LE.JM-1) THEN
+            FCUP_J = FACUP(J+1)
+            GSUM = GSUM
+     &        + STORE(IMM1,J+1,K)*FBR(IMM1,K)*FCUP_J
+     &        + STORE(IMM1,J+1,K-1)*FTR(IMM1,K-1)*FCUP_J
+          END IF
+          D(IM,J,K) = D(IM,J,K) + GSUM
+        ENDDO
+      ENDDO
+C$OMP END DO NOWAIT
+C
+C     --- J=1 face (I=2..IMM1, K=2..KMM1): only FACUP contrib ---
+C$OMP DO SCHEDULE(STATIC)
+      DO K=2,KMM1
+        DO I=2,IMM1
+          FCUP_J = FACUP(2)
+          D(I,1,K) = D(I,1,K)
+     &    + STORE(I,2,K)*FBL(I,K)*FCUP_J
+     &    + STORE(I-1,2,K)*FBR(I-1,K)*FCUP_J
+     &    + STORE(I,2,K-1)*FTL(I,K-1)*FCUP_J
+     &    + STORE(I-1,2,K-1)*FTR(I-1,K-1)*FCUP_J
+        ENDDO
+      ENDDO
+C$OMP END DO NOWAIT
+C     --- J=JM face (I=2..IMM1, K=2..KMM1): only FACDWN contrib ---
+C$OMP DO SCHEDULE(STATIC)
+      DO K=2,KMM1
+        DO I=2,IMM1
+          FCDN = FACDWN(JM)
+          D(I,JM,K) = D(I,JM,K)
+     &    + STORE(I,JM,K)*FBL(I,K)*FCDN
+     &    + STORE(I-1,JM,K)*FBR(I-1,K)*FCDN
+     &    + STORE(I,JM,K-1)*FTL(I,K-1)*FCDN
+     &    + STORE(I-1,JM,K-1)*FTR(I-1,K-1)*FCDN
+        ENDDO
       ENDDO
 C$OMP END DO
 C
-C---- CELL->NODE: Phase 2 — boundary faces (sequential, SINGLE) ----
-C
-C$OMP SINGLE
-C
-C     --- K=1 and K=KM faces (all I, all J) ---
-      DO K=1,KM,KM-1
-      DO J=1,JM
-      DO I=1,IM
-      GSUM = 0.0
-      IF(J.GE.2) THEN
-      FCDN = FACDWN(J)
-      IF(I.LE.IMM1.AND.K.LE.KMM1)
-     & GSUM = GSUM + STORE(I,J,K)*FBL(I,K)*FCDN
-      IF(I.GE.2.AND.K.LE.KMM1)
-     & GSUM = GSUM + STORE(I-1,J,K)*FBR(I-1,K)*FCDN
-      IF(I.LE.IMM1.AND.K.GE.2)
-     & GSUM = GSUM + STORE(I,J,K-1)*FTL(I,K-1)*FCDN
-      IF(I.GE.2.AND.K.GE.2)
-     & GSUM = GSUM
-     & + STORE(I-1,J,K-1)*FTR(I-1,K-1)*FCDN
-      END IF
-      IF(J.LE.JM-1) THEN
-      FCUP_J = FACUP(J+1)
-      IF(I.LE.IMM1.AND.K.LE.KMM1)
-     & GSUM = GSUM + STORE(I,J+1,K)*FBL(I,K)*FCUP_J
-      IF(I.GE.2.AND.K.LE.KMM1)
-     & GSUM = GSUM
-     & + STORE(I-1,J+1,K)*FBR(I-1,K)*FCUP_J
-      IF(I.LE.IMM1.AND.K.GE.2)
-     & GSUM = GSUM
-     & + STORE(I,J+1,K-1)*FTL(I,K-1)*FCUP_J
-      IF(I.GE.2.AND.K.GE.2)
-     & GSUM = GSUM
-     & + STORE(I-1,J+1,K-1)*FTR(I-1,K-1)*FCUP_J
-      END IF
-      D(I,J,K) = D(I,J,K) + GSUM
-      ENDDO
-      ENDDO
-      ENDDO
-C
-C     --- I=1 and I=IM faces (all J, K=2..KMM1 interior) ---
-      DO K=2,KMM1
-      DO J=1,JM
-      DO I=1,IM,IM-1
-      GSUM = 0.0
-      IF(J.GE.2) THEN
-      FCDN = FACDWN(J)
-      IF(I.LE.IMM1)
-     & GSUM = GSUM + STORE(I,J,K)*FBL(I,K)*FCDN
-      IF(I.GE.2)
-     & GSUM = GSUM + STORE(I-1,J,K)*FBR(I-1,K)*FCDN
-      IF(I.LE.IMM1)
-     & GSUM = GSUM + STORE(I,J,K-1)*FTL(I,K-1)*FCDN
-      IF(I.GE.2)
-     & GSUM = GSUM
-     & + STORE(I-1,J,K-1)*FTR(I-1,K-1)*FCDN
-      END IF
-      IF(J.LE.JM-1) THEN
-      FCUP_J = FACUP(J+1)
-      IF(I.LE.IMM1)
-     & GSUM = GSUM + STORE(I,J+1,K)*FBL(I,K)*FCUP_J
-      IF(I.GE.2)
-     & GSUM = GSUM
-     & + STORE(I-1,J+1,K)*FBR(I-1,K)*FCUP_J
-      IF(I.LE.IMM1)
-     & GSUM = GSUM
-     & + STORE(I,J+1,K-1)*FTL(I,K-1)*FCUP_J
-      IF(I.GE.2)
-     & GSUM = GSUM
-     & + STORE(I-1,J+1,K-1)*FTR(I-1,K-1)*FCUP_J
-      END IF
-      D(I,J,K) = D(I,J,K) + GSUM
-      ENDDO
-      ENDDO
-      ENDDO
-C
-C     --- J=1 and J=JM faces (I=2..IMM1, K=2..KMM1 interior) ---
-      DO K=2,KMM1
-      DO J=1,JM,JM-1
-      DO I=2,IMM1
-      GSUM = 0.0
-      IF(J.GE.2) THEN
-      FCDN = FACDWN(J)
-      GSUM = GSUM + STORE(I,J,K)*FBL(I,K)*FCDN
-     & + STORE(I-1,J,K)*FBR(I-1,K)*FCDN
-     & + STORE(I,J,K-1)*FTL(I,K-1)*FCDN
-     & + STORE(I-1,J,K-1)*FTR(I-1,K-1)*FCDN
-      END IF
-      IF(J.LE.JM-1) THEN
-      FCUP_J = FACUP(J+1)
-      GSUM = GSUM + STORE(I,J+1,K)*FBL(I,K)*FCUP_J
-     & + STORE(I-1,J+1,K)*FBR(I-1,K)*FCUP_J
-     & + STORE(I,J+1,K-1)*FTL(I,K-1)*FCUP_J
-     & + STORE(I-1,J+1,K-1)*FTR(I-1,K-1)*FCUP_J
-      END IF
-      D(I,J,K) = D(I,J,K) + GSUM
-      ENDDO
-      ENDDO
-      ENDDO
-C
-C$OMP END SINGLE
-C
 C$OMP MASTER
+      CALL TIMER_STOP(T_TSTEP_CN_PH2)
       CALL TIMER_STOP(T_TSTEP_CELLNODE)
       CALL TIMER_START(T_TSTEP_SMOOTHVAR)
 C$OMP END MASTER
@@ -19893,7 +19923,7 @@ C******************************************************************************
 
        SUBROUTINE TIMER_INIT
       INTEGER NT
-      PARAMETER (NT=55)
+      PARAMETER (NT=57)
        DOUBLE PRECISION TSTART, TACCUM
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
        INTEGER I
@@ -19910,7 +19940,7 @@ C******************************************************************************
        SUBROUTINE TIMER_START(ID)
        INTEGER ID
       INTEGER NT
-      PARAMETER (NT=55)
+      PARAMETER (NT=57)
        DOUBLE PRECISION TSTART, TACCUM, NOW
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -19924,7 +19954,7 @@ C******************************************************************************
        SUBROUTINE TIMER_STOP(ID)
        INTEGER ID
       INTEGER NT
-      PARAMETER (NT=55)
+      PARAMETER (NT=57)
        DOUBLE PRECISION TSTART, TACCUM, NOW
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -19938,7 +19968,7 @@ C******************************************************************************
             SUBROUTINE TIMER_ACCUM(ID, DT)
             INTEGER ID
             INTEGER NT
-            PARAMETER (NT=55)
+            PARAMETER (NT=57)
             DOUBLE PRECISION TSTART, TACCUM, DT
             COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -19950,7 +19980,7 @@ C******************************************************************************
 
        SUBROUTINE TIMER_REPORT
       INTEGER NT
-      PARAMETER (NT=55)
+      PARAMETER (NT=57)
        DOUBLE PRECISION TSTART, TACCUM
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
       CHARACTER*40 NAME(NT)
@@ -20011,6 +20041,8 @@ C******************************************************************************
                   DATA NAME(53) /'LOOP: CELL AVG DENSITY'/
                   DATA NAME(54) /'LOOP: TABSEARCH'/
                   DATA NAME(55) /'LOOP: TABINTERP'/
+                  DATA NAME(56) /'CELL->NODE: PH1 INTERIOR'/
+                  DATA NAME(57) /'CELL->NODE: PH2 BOUNDARY'/
 
        WRITE(4,*)
        WRITE(4,*) '================ WALL TIME SUMMARY (s) ================'

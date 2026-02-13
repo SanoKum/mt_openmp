@@ -1,0 +1,66 @@
+EMAX,EAVG,ECONT 0.91126E+01 0.36966E+00 0.38887E+00 FLOW 0.11822E+03STEP    5AT    2  908   12
+EMAX,EAVG,ECONT 0.36713E+02 0.71637E+00 0.33314E+00 FLOW 0.11183E+03STEP   10AT  122  934   18
+EMAX,EAVG,ECONT 0.19255E+03 0.15729E+01 0.34875E+00 FLOW 0.11621E+03STEP   15AT    2  872   22
+EMAX,EAVG,ECONT-0.41793E+03 0.30249E+01 0.39806E+00 FLOW 0.12183E+03STEP   20AT    2  911   22
+EMAX,EAVG,ECONT-0.82303E+03 0.49955E+01 0.64621E+00 FLOW 0.12883E+03STEP   25AT    2  652   15
+EMAX,EAVG,ECONT-0.12878E+04 0.78321E+01 0.95400E+00 FLOW 0.13602E+03STEP   30AT  127  663   15
+EMAX,EAVG,ECONT-0.24699E+04 0.11817E+02 0.14477E+01 FLOW 0.14258E+03STEP   35AT    2  639    7
+EMAX,EAVG,ECONT 0.00000E+00         NaN 0.12684E+08 FLOW 0.14848E+03STEP   40AT    2  639    7
+EMAX,EAVG,ECONT 0.00000E+00         NaN 0.00000E+00 FLOW         NaNSTEP   45AT    2  639    7
+EMAX,EAVG,ECONT 0.00000E+00         NaN 0.00000E+00 FLOW         NaNSTEP   46AT    2  639    7
+
+ ================ WALL TIME SUMMARY (s) ================
+ ID                                   SECTION   SECONDS
+  1  MAIN: NEW_READIN                                0.0130
+  2  MAIN: OLD_READIN                                0.0000
+  3  MAIN: SETUP                                    31.9510
+  4  LOOP: TOTAL                                    44.2800
+  5  LOOP: COOL/BLEED INIT                           0.0000
+  6  LOOP: INVERSE INPUT                             0.0000
+  7  LOOP: SMOOTH/DAMP                               0.0000
+  8  LOOP: VELOCITY UPDATE                           0.6350
+  9  LOOP: PRESSURE/TEMP                             7.2380
+ 10  LOOP: VISCOUS/TURB MODEL                        3.2780
+ 11  LOOP: MASS FLUX                                 1.6930
+ 12  LOOP: INVERSE FORCE/GEOM                        0.0000
+ 13  LOOP: BOUNDARY/LEAK/COOL                        0.0170
+ 14  TSTEP: DENSITY                                  4.0060
+ 15  TSTEP: SA VISC                                  0.0000
+ 16  TSTEP: ENERGY                                   3.9310
+ 17  TSTEP: MOMENTUM-X                               3.8420
+ 18  TSTEP: MOMENTUM-T                               3.8970
+ 19  TSTEP: MOMENTUM-R                               3.9010
+ 20  TSTEP: MG INIT                                  0.0040
+ 21  TSTEP: TIP GAP                                  0.0000
+ 22  TSTEP: FEXTRAP                                  0.0170
+ 23  TSTEP: DELTA/STORE                              2.5730
+ 24  TSTEP: PITCH AVG                                0.0050
+ 25  TSTEP: MG AGG                                   1.4850
+ 26  TSTEP: STEP/DAMP                                2.8060
+ 27  TSTEP: SA SPECIAL                               0.0000
+ 28  TSTEP: CELL->NODE                               3.6600
+ 29  TSTEP: SMOOTH_VAR                               8.9510
+ 30  TSTEP: FINAL AVG                                0.0690
+ 31  TSTEP: PITCH AVG POST-MG                        0.0050
+ 32  LOOP: SA FLUX SETUP                             0.0000
+ 33  LOOP: MASS FLUX RFLUX                           0.4650
+ 34  LOOP: Q3D BODY FORCE                            0.0000
+ 35  LOOP: ZERO MASS HUB/CASING                      0.0060
+ 36  LOOP: BLEED HUB/CASING                          0.0000
+ 37  LOOP: COOLANT MASS FLUX                         0.0000
+ 38  LOOP: SHROUD MASS FLUX                          0.0000
+ 39  LOOP: ENERGY FLUX/SOURCE                        1.1800
+ 40  LOOP: MOMENTUM FLUX BUILD                       4.4030
+ 41  MAIN: TOTAL WALL TIME                          76.2440
+ 42  SMOOTH_VAR: STREAMWISE CORE                     1.0950
+ 44  SMOOTH_VAR: LEADING EDGE                        0.0050
+ 45  SMOOTH_VAR: RESET D                             1.0350
+ 46  SMOOTH_VAR: PITCH/SPANWISE                      6.7820
+ 47  SMOOTH_VAR: EXIT FLOW                           0.0330
+ 48  LOOP: VRMS/VMAX (E5)                            0.0810
+ 49  LOOP: TFLOW ADDITION                            0.0000
+ 50  LOOP: INV START/END OUT                         0.0000
+ 51  LOOP: NO-INV SURF ZERO                          0.0510
+ 52  LOOP: BLEED SURF FLUX                           0.0000
+ 53  LOOP: CELL AVG DENSITY                          0.0000
+ ========================================================
