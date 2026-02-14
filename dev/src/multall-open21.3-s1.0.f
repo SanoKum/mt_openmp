@@ -3783,6 +3783,8 @@ C
      &          P_PSURF(JD),P_SSURF(JD),SFRAC(JD)
       REAL T_REL_M_MAX
       INTEGER T_IMACH, T_JMACH, T_KMACH
+      REAL T_EMAX
+      INTEGER T_IMAX, T_JMAX, T_KMAX
 
       INTEGER T_LOOP_TOTAL, T_LOOP_COOL_BLEED, T_LOOP_INV_INPUT
       INTEGER T_LOOP_SMOOTH, T_LOOP_VEL, T_LOOP_PRES
@@ -3797,6 +3799,10 @@ C
       INTEGER T_LOOP_DNSCHECK, T_LOOP_MACHCHECK
       INTEGER T_LOOP_MIXPLAN, T_LOOP_TESEP
       INTEGER T_LOOP_CONV5STP
+      INTEGER T_CONV5_BLADEFLOW, T_CONV5_EMAXEAVG
+      INTEGER T_CONV5_STEPUP
+      INTEGER T_5STP_ECONT, T_5STP_OUTPUT
+      INTEGER T_5STP_EFICOOL, T_5STP_IO
       INTEGER T_MAIN_TOTAL
       INTEGER T_LOOP_VRMS, T_LOOP_TFLOW, T_LOOP_INVSTEND
       INTEGER T_LOOP_NOINVZERO, T_LOOP_BLEED_SURF2
@@ -3847,6 +3853,13 @@ C
       PARAMETER (T_LOOP_MIXPLAN=66)
       PARAMETER (T_LOOP_TESEP=67)
       PARAMETER (T_LOOP_CONV5STP=68)
+      PARAMETER (T_CONV5_BLADEFLOW=69)
+      PARAMETER (T_CONV5_EMAXEAVG=70)
+      PARAMETER (T_CONV5_STEPUP=71)
+      PARAMETER (T_5STP_ECONT=72)
+      PARAMETER (T_5STP_OUTPUT=73)
+      PARAMETER (T_5STP_EFICOOL=74)
+      PARAMETER (T_5STP_IO=75)
 
       COMMON /TABTIME/ ITABTIME, TS_CNT
 
@@ -6454,6 +6467,12 @@ C
 C        CHECK_FLOW  Is the local mass flow excluding cooling flows, leakage and bleed flows.
 C        This should be conserved and is used as a check for global continuity.  
 C
+      CALL TIMER_START(T_CONV5_BLADEFLOW)
+C$OMP PARALLEL DO DEFAULT(NONE)
+C$OMP&PRIVATE(J,I,K,SUMAS,NB)
+C$OMP&SHARED(JM,IMM1,KMM1,FLOWX,NBLADE,SHRDFLOW,SUMBLEED,SUMCWL,
+C$OMP&BLADE_FLOW,CHECK_FLOW)
+C$OMP&SCHEDULE(STATIC)
       DO 5675 J=1,JM
       SUMAS = 0
       NB = NBLADE(J)
@@ -6464,6 +6483,9 @@ C
       BLADE_FLOW(J) =  SUMAS*NB
       CHECK_FLOW(J)  = (SUMAS + SHRDFLOW(J))*NB+ SUMBLEED(J)- SUMCWL(J)
  5675 CONTINUE
+C$OMP END PARALLEL DO
+      CALL TIMER_STOP(T_CONV5_BLADEFLOW)
+      CALL TIMER_START(T_5STP_ECONT)
       ECONT    = 0.0
       DO 5677 J=1,JM
       RATIO = CHECK_FLOW(J)/CHECK_FLOW(1)
@@ -6474,6 +6496,7 @@ C
       END IF
  5677 CONTINUE
       FLOWRAT =  BLADE_FLOW(1)
+      CALL TIMER_STOP(T_5STP_ECONT)
 C
 C******************************************************************************
 C******************************************************************************
@@ -6481,10 +6504,22 @@ C     CALCULATE THE MAXIMUM PERCENTAGE CHANGE IN MERIDIONAL VELOCITY AND SAVE
 C     IT AS STORE(I,J,K) FOR THE CONVERGENCE CHECK.
 C     THIS IS ONLY DONE EVERY 5 ITERATIONS.
 C
+      CALL TIMER_START(T_CONV5_EMAXEAVG)
       EMAX=0.0
       EAVG=0.0
       VREF = SQRT(VRMS*RIJKM)
       RVEF = 100./VREF
+C$OMP PARALLEL DEFAULT(NONE)
+C$OMP&PRIVATE(I,J,K,XD,RD,SD,VM_START,VM_END,DVMER,
+C$OMP&T_EMAX,T_IMAX,T_JMAX,T_KMAX)
+C$OMP&SHARED(KM,JMM1,IM,DX,DR,DS,VX,VR,ROVX,ROVR,RO,RVEF,STORE)
+C$OMP&REDUCTION(+:EAVG)
+C$OMP&SHARED(EMAX,IMAX,JMAX,KMAX)
+      T_EMAX = 0.0
+      T_IMAX = 0
+      T_JMAX = 0
+      T_KMAX = 0
+C$OMP DO SCHEDULE(STATIC)
       DO 8500 K=1,KM
 C    JDD CHANGED NEXT LINE TO JMM1 FOR IPOUT=4.
       DO 8510 J=2,JMM1
@@ -6498,17 +6533,28 @@ C    JDD CHANGED NEXT LINE TO JMM1 FOR IPOUT=4.
       DVMER  = (VM_END - VM_START)*RVEF
       STORE(I,J,K) = DVMER
       EAVG   = EAVG + ABS(DVMER)
-      IF(ABS(DVMER).GT.ABS(EMAX)) THEN
-           EMAX = DVMER
-           IMAX = I
-           JMAX = J
-           KMAX = K
+      IF(ABS(DVMER).GT.ABS(T_EMAX)) THEN
+           T_EMAX = DVMER
+           T_IMAX = I
+           T_JMAX = J
+           T_KMAX = K
       ENDIF
  8520 CONTINUE
  8510 CONTINUE
  8500 CONTINUE
+C$OMP END DO
+C$OMP CRITICAL
+      IF(ABS(T_EMAX).GT.ABS(EMAX)) THEN
+         EMAX = T_EMAX
+         IMAX = T_IMAX
+         JMAX = T_JMAX
+         KMAX = T_KMAX
+      END IF
+C$OMP END CRITICAL
+C$OMP END PARALLEL
 C
       EAVG=EAVG/(IM*JMM1*KM)
+      CALL TIMER_STOP(T_CONV5_EMAXEAVG)
 C
 C******************************************************************************
 C******************************************************************************
@@ -6529,18 +6575,24 @@ C******************************************************************************
 C    CALL OUTPUT TO PRINT OUT MAIN PRINTED OUTPUT IF REQUESTED, OR IF CONVERGED.
 C    CALL THE LOSS ROUTINES TO UPDATE THE VISCOUS FORCES BEFORE PRINTING OUT.
 C
+      CALL TIMER_START(T_5STP_OUTPUT)
       IF(IFPRINT.EQ.1.OR.IFEND.EQ.1) THEN
       IF(ILOS.EQ.10)                  CALL LOSS
       IF(ILOS.GE.100.AND.ILOS.LT.200) CALL NEW_LOSS
       IF(ILOS.GE.200)                 CALL SPAL_LOSS
       CALL OUTPUT
       END IF
+      CALL TIMER_STOP(T_5STP_OUTPUT)
 C
 C******************************************************************************
 C******************************************************************************
 C      CALL STEPUP EVERY TO UPDATE THE TIMESTEP IF ITIMST=3
 C
-      IF(ITIMST.GE.3) CALL STEPUP(0.25)
+      IF(ITIMST.GE.3) THEN
+      CALL TIMER_START(T_CONV5_STEPUP)
+      CALL STEPUP(0.25)
+      CALL TIMER_STOP(T_CONV5_STEPUP)
+      END IF
 C
 C******************************************************************************
 C******************************************************************************
@@ -6548,6 +6600,7 @@ C
 C      CALL EFICOOL TO PRINT OUT MASS AVERAGED QUANTITIES
 C      AND MACHINE EFFICIENCY AND SHROUD LEAKAGE FLOWS EVERY 200 STEPS.
 C
+      CALL TIMER_START(T_5STP_EFICOOL)
       IF(MOD(NSTEP,200).EQ.0.OR.IFPRINT.EQ.1.OR.IFEND.EQ.1) THEN
       CALL EFICOOL(HBLEDTOT)
 C
@@ -6581,11 +6634,13 @@ C
 C
 C   END OF OUTPUT EVERY 200 STEPS OR WHEN FINISHED OR CONVERGED.
       ENDIF
+      CALL TIMER_STOP(T_5STP_EFICOOL)
 C
 C******************************************************************************
 C******************************************************************************
 C      WRITE OUT A SHORT OUTPUT SUMMARY EVERY 5 STEPS
 C
+      CALL TIMER_START(T_5STP_IO)
       IF(NSTEP.EQ.5.OR.MOD(NSTEP,50).EQ.0) WRITE(6,9002)ITIMST,CFL,
      &    DAMP,SFT,SFX,FEXTRAP,F1,F2EFF,F3,NRSMTH
  9002 FORMAT(/,' ISTEP=',I2,' CFL=',F5.2,' DAMP= ',F5.2,' SFT,SFX= ',
@@ -6683,6 +6738,7 @@ C
 C
       WRITE(4,9009) EMAX,EAVG,ECONT,FLOWRAT,NSTEP,IMAX,JMAX,KMAX
  9009 FORMAT('EMAX,EAVG,ECONT',3E12.5,' FLOW',E12.5,'STEP',I5,'AT',3I5)
+      CALL TIMER_STOP(T_5STP_IO)
 C
 C******************************************************************************
 C******************************************************************************
@@ -9709,37 +9765,87 @@ C
 C******************************************************************************
 C     CALCULATE THE LOCAL SPEED OF SOUND AND SET THE FACTOR  C/(V+C)
 C
+C$OMP PARALLEL DEFAULT(NONE)
+C$OMP&PRIVATE(K,J,I,VSQ,HSTAT,GAMNOW,TSTATIC,CPNOW,DH,DH2,
+C$OMP&WTREL,WSQ,V_SONIC,VPLUSC,KP1,AVMACH,STEPNEW)
+C$OMP&SHARED(KM,JM,IM,VX,VT,VR,HO,P,RO,GA_PV,WT,
+C$OMP&TEMP1,IFGAS,ITIMST,GA,VSOUND,
+C$OMP&TREF,HREF,HT1,HT2,HT3,HT4,
+C$OMP&CP1,CP2,CP3,RGAS,TLIM,VLIM,
+C$OMP&IMM1,KMM1,BSTEP,STEP,RSTEP,RELAX,RELAX1)
+C
+C     CALCULATE THE LOCAL SPEED OF SOUND AND SET THE FACTOR  C/(V+C)
+C
+C$OMP DO SCHEDULE(STATIC)
       DO 1100 K=1,KM
-      DO 1100 J=1,JM
-      DO 1100 I=1,IM
-      VSQ = VX(I,J,K)*VX(I,J,K)+VT(I,J,K)*VT(I,J,K)+VR(I,J,K)*VR(I,J,K)
-      HSTAT  = HO(I,J,K) - 0.5*VSQ
-C
-      IF(IFGAS.EQ.0) GAMNOW  = GA
-C
-      IF(IFGAS.EQ.1) THEN
-           TSTATIC = TFROMH(HSTAT,TREF,HREF,HT1,HT2,HT3,HT4)
-           IF(TSTATIC.LT.TLIM) TSTATIC = TLIM
-           CPNOW   = CP1 + CP2*(TSTATIC-TREF) 
-     &             + CP3*(TSTATIC-TREF)*(TSTATIC-TREF) 
-           GAMNOW  = CPNOW/(CPNOW-RGAS)
-      END IF
-C
-      IF(IFGAS.EQ.3) GAMNOW = GA_PV(I,J,K)
-C
-      WTREL     = WT(I,J,K)
-      WSQ       = VSQ - (VT(I,J,K)*VT(I,J,K) - WTREL*WTREL)
-      IF(WSQ.LT.VLIM) WSQ = VLIM
+      DO 1101 J=1,JM
 C
       IF(ITIMST.GE.5) THEN
-           V_SONIC = VSOUND
+C       V_SONIC = VSOUND (constant), no GAMNOW/HSTAT needed
+C$OMP SIMD
+      DO I=1,IM
+      VSQ = VX(I,J,K)*VX(I,J,K)+VT(I,J,K)*VT(I,J,K)
+     &    + VR(I,J,K)*VR(I,J,K)
+      WTREL = WT(I,J,K)
+      WSQ = MAX(VSQ - VT(I,J,K)*VT(I,J,K) + WTREL*WTREL, VLIM)
+      VPLUSC = SQRT(WSQ) + VSOUND
+      TEMP1(I,J,K) = VSOUND/VPLUSC
+      ENDDO
+C
+      ELSE IF(IFGAS.EQ.0) THEN
+C       Perfect gas: GAMNOW = GA (constant)
+C$OMP SIMD
+      DO I=1,IM
+      VSQ = VX(I,J,K)*VX(I,J,K)+VT(I,J,K)*VT(I,J,K)
+     &    + VR(I,J,K)*VR(I,J,K)
+      WTREL = WT(I,J,K)
+      WSQ = MAX(VSQ - VT(I,J,K)*VT(I,J,K) + WTREL*WTREL, VLIM)
+      V_SONIC = SQRT(GA*P(I,J,K)/RO(I,J,K))
+      VPLUSC = SQRT(WSQ) + V_SONIC
+      TEMP1(I,J,K) = VSOUND/VPLUSC
+      ENDDO
+C
+      ELSE IF(IFGAS.EQ.1) THEN
+C       Semi-perfect gas: inline TFROMH to enable vectorization
+C$OMP SIMD
+      DO I=1,IM
+      VSQ = VX(I,J,K)*VX(I,J,K)+VT(I,J,K)*VT(I,J,K)
+     &    + VR(I,J,K)*VR(I,J,K)
+      HSTAT = HO(I,J,K) - 0.5*VSQ
+      DH = HSTAT - HREF
+      DH2 = DH*DH
+      TSTATIC = TREF + HT1*DH + HT2*DH2
+     &        + HT3*DH*DH2 + HT4*DH2*DH2
+      TSTATIC = MAX(TSTATIC, TLIM)
+      CPNOW = CP1 + CP2*(TSTATIC-TREF)
+     &      + CP3*(TSTATIC-TREF)*(TSTATIC-TREF)
+      GAMNOW = CPNOW/(CPNOW-RGAS)
+      WTREL = WT(I,J,K)
+      WSQ = MAX(VSQ - VT(I,J,K)*VT(I,J,K) + WTREL*WTREL, VLIM)
+      V_SONIC = SQRT(GAMNOW*P(I,J,K)/RO(I,J,K))
+      VPLUSC = SQRT(WSQ) + V_SONIC
+      TEMP1(I,J,K) = VSOUND/VPLUSC
+      ENDDO
+C
       ELSE
-           V_SONIC = SQRT(GAMNOW*P(I,J,K)/RO(I,J,K))
+C       IFGAS=3: steam tables, GAMNOW from lookup
+C$OMP SIMD
+      DO I=1,IM
+      VSQ = VX(I,J,K)*VX(I,J,K)+VT(I,J,K)*VT(I,J,K)
+     &    + VR(I,J,K)*VR(I,J,K)
+      GAMNOW = GA_PV(I,J,K)
+      WTREL = WT(I,J,K)
+      WSQ = MAX(VSQ - VT(I,J,K)*VT(I,J,K) + WTREL*WTREL, VLIM)
+      V_SONIC = SQRT(GAMNOW*P(I,J,K)/RO(I,J,K))
+      VPLUSC = SQRT(WSQ) + V_SONIC
+      TEMP1(I,J,K) = VSOUND/VPLUSC
+      ENDDO
+C
       END IF
 C
-      VPLUSC    =  SQRT(WSQ) + V_SONIC
-C
- 1100 TEMP1(I,J,K) =  VSOUND/VPLUSC
+ 1101 CONTINUE
+ 1100 CONTINUE
+C$OMP END DO
 C
 C       TEMP1 IS USED AS A TEMPORARY STORE FOR  VSOUND/(W + VSOUND)
 C       WHERE VSOUND IS THE STAGNATION SPEED OF SOUND AND W ISTHE RELATIVE VELOCITY.
@@ -9747,21 +9853,23 @@ C
 C******************************************************************************
 C  USE  BSTEP AND THE LOCAL VELOCITIES TO SET THE TIME STEP/VOLUME   STEP(I,J,K).
 C
-      DO 10 I=1,IMM1
-      IP1=I+1
+C$OMP DO SCHEDULE(STATIC)
       DO 10 K=1,KMM1
       KP1=K+1
-      AMACHP =  TEMP1(I,1,K)   + TEMP1(IP1,1,K) +
-     &          TEMP1(I,1,KP1) + TEMP1(IP1,1,KP1)
-      DO 10 J=  2,JM
-      AMACHL =  TEMP1(I,J,K)   + TEMP1(I,J,KP1) +
-     &          TEMP1(IP1,J,K) + TEMP1(IP1,J,KP1)
-      AVMACH =  0.125*(AMACHL  + AMACHP)
-      AMACHP =  AMACHL
+      DO 11 J=2,JM
+      DO 12 I=1,IMM1
+      AVMACH = 0.125*(TEMP1(I,J-1,K)   + TEMP1(I+1,J-1,K)
+     &              + TEMP1(I,J-1,KP1)  + TEMP1(I+1,J-1,KP1)
+     &              + TEMP1(I,J,K)      + TEMP1(I+1,J,K)
+     &              + TEMP1(I,J,KP1)    + TEMP1(I+1,J,KP1))
       STEPNEW      =  BSTEP(I,J,K)*AVMACH
       STEP(I,J,K)  =  RELAX*STEPNEW  +  RELAX1*STEP(I,J,K)
       RSTEP(I,J,K) =  STEP(I,J,K)/BSTEP(I,J,K)
+   12 CONTINUE
+   11 CONTINUE
    10 CONTINUE
+C$OMP END DO
+C$OMP END PARALLEL
 C
 C******************************************************************************
 C      SET THE TIME STEP AT THE MIXING PLANE, ie AT J = JMIX + 1..
@@ -20001,7 +20109,7 @@ C******************************************************************************
 
        SUBROUTINE TIMER_INIT
       INTEGER NT
-      PARAMETER (NT=68)
+      PARAMETER (NT=75)
        DOUBLE PRECISION TSTART, TACCUM
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
        INTEGER I
@@ -20018,7 +20126,7 @@ C******************************************************************************
        SUBROUTINE TIMER_START(ID)
        INTEGER ID
       INTEGER NT
-      PARAMETER (NT=68)
+      PARAMETER (NT=75)
        DOUBLE PRECISION TSTART, TACCUM, NOW
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -20032,7 +20140,7 @@ C******************************************************************************
        SUBROUTINE TIMER_STOP(ID)
        INTEGER ID
       INTEGER NT
-      PARAMETER (NT=68)
+      PARAMETER (NT=75)
        DOUBLE PRECISION TSTART, TACCUM, NOW
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -20046,7 +20154,7 @@ C******************************************************************************
             SUBROUTINE TIMER_ACCUM(ID, DT)
             INTEGER ID
             INTEGER NT
-            PARAMETER (NT=68)
+            PARAMETER (NT=75)
             DOUBLE PRECISION TSTART, TACCUM, DT
             COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -20058,7 +20166,7 @@ C******************************************************************************
 
        SUBROUTINE TIMER_REPORT
       INTEGER NT
-      PARAMETER (NT=68)
+      PARAMETER (NT=75)
        DOUBLE PRECISION TSTART, TACCUM
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
       CHARACTER*40 NAME(NT)
@@ -20131,7 +20239,14 @@ C******************************************************************************
                   DATA NAME(65) /'LOOP: MACH CHECK'/
                   DATA NAME(66) /'LOOP: MIXPLAN'/
                   DATA NAME(67) /'LOOP: TE SEPARATION'/
-                  DATA NAME(68) /'LOOP: CONV CHECK (5STP)'/
+                  DATA NAME(68) /'LOOP: EVERY 5 STEPS'/
+                  DATA NAME(69) /'5STP: BLADE_FLOW CALC'/
+                  DATA NAME(70) /'5STP: EMAX/EAVG CALC'/
+                  DATA NAME(71) /'5STP: STEPUP'/
+                  DATA NAME(72) /'5STP: ECONT CALC'/
+                  DATA NAME(73) /'5STP: OUTPUT/LOSS'/
+                  DATA NAME(74) /'5STP: EFICOOL'/
+                  DATA NAME(75) /'5STP: SUMMARY I/O'/
 
        WRITE(4,*)
        WRITE(4,*) '================ WALL TIME SUMMARY (s) ================'

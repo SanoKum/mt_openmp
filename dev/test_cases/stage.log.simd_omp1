@@ -6,7 +6,7 @@ EMAX,EAVG,ECONT 0.27042E+01 0.20838E+00 0.44678E+00 FLOW 0.12677E+03STEP   25AT 
 EMAX,EAVG,ECONT 0.22459E+01 0.18700E+00 0.45694E+00 FLOW 0.13297E+03STEP   30AT    1  191   48
 EMAX,EAVG,ECONT 0.23834E+01 0.18453E+00 0.46144E+00 FLOW 0.13955E+03STEP   35AT    1  191   47
 EMAX,EAVG,ECONT-0.24199E+01 0.18004E+00 0.46467E+00 FLOW 0.14614E+03STEP   40AT   63  183   46
-EMAX,EAVG,ECONT-0.22093E+01 0.17451E+00 0.49345E+00 FLOW 0.15253E+03STEP   45AT   63  178   55
+EMAX,EAVG,ECONT-0.22094E+01 0.17451E+00 0.49345E+00 FLOW 0.15253E+03STEP   45AT   63  178   55
 EMAX,EAVG,ECONT-0.20023E+01 0.17310E+00 0.52569E+00 FLOW 0.15856E+03STEP   50AT    3  181   50
 EMAX,EAVG,ECONT-0.22475E+01 0.16711E+00 0.58004E+00 FLOW 0.16417E+03STEP   55AT    3  181   51
 EMAX,EAVG,ECONT-0.18915E+01 0.15825E+00 0.63142E+00 FLOW 0.16937E+03STEP   60AT    3  182   55
@@ -17,62 +17,82 @@ EMAX,EAVG,ECONT-0.24809E+01 0.12856E+00 0.75561E+00 FLOW 0.18549E+03STEP   80AT 
 EMAX,EAVG,ECONT-0.33231E+01 0.12869E+00 0.75857E+00 FLOW 0.18829E+03STEP   85AT    1  191   45
 EMAX,EAVG,ECONT-0.31112E+01 0.12971E+00 0.74978E+00 FLOW 0.19065E+03STEP   90AT    1  191   45
 EMAX,EAVG,ECONT-0.27311E+01 0.13115E+00 0.73217E+00 FLOW 0.19257E+03STEP   95AT    1  191   46
-EMAX,EAVG,ECONT 0.27797E+01 0.13162E+00 0.70818E+00 FLOW 0.19406E+03STEP  100AT   64  194    1
+EMAX,EAVG,ECONT 0.27796E+01 0.13162E+00 0.70818E+00 FLOW 0.19406E+03STEP  100AT   64  194    1
 
  ================ WALL TIME SUMMARY (s) ================
  ID                                   SECTION   SECONDS
   1  MAIN: NEW_READIN                                0.0130
   2  MAIN: OLD_READIN                                0.0000
-  3  MAIN: SETUP                                    14.6300
-  4  LOOP: TOTAL                                    36.8390
+  3  MAIN: SETUP                                    17.5270
+  4  LOOP: TOTAL                                    62.0910
   5  LOOP: COOL/BLEED INIT                           0.0000
   6  LOOP: INVERSE INPUT                             0.0000
   7  LOOP: SMOOTH/DAMP                               0.0000
-  8  LOOP: VELOCITY UPDATE                           0.5510
-  9  LOOP: PRESSURE/TEMP                             4.9090
- 10  LOOP: VISCOUS/TURB MODEL                        2.9170
- 11  LOOP: MASS FLUX                                 1.4110
+  8  LOOP: VELOCITY UPDATE                           1.2810
+  9  LOOP: PRESSURE/TEMP                             5.6310
+ 10  LOOP: VISCOUS/TURB MODEL                        4.2860
+ 11  LOOP: MASS FLUX                                 3.5090
  12  LOOP: INVERSE FORCE/GEOM                        0.0000
- 13  LOOP: BOUNDARY/LEAK/COOL                        0.0110
- 14  TSTEP: DENSITY                                  3.4800
+ 13  LOOP: BOUNDARY/LEAK/COOL                        0.0170
+ 14  TSTEP: DENSITY                                  6.0900
  15  TSTEP: SA VISC                                  0.0000
- 16  TSTEP: ENERGY                                   3.4870
- 17  TSTEP: MOMENTUM-X                               3.4830
- 18  TSTEP: MOMENTUM-T                               3.4850
- 19  TSTEP: MOMENTUM-R                               3.4650
+ 16  TSTEP: ENERGY                                   6.1280
+ 17  TSTEP: MOMENTUM-X                               6.1400
+ 18  TSTEP: MOMENTUM-T                               6.0980
+ 19  TSTEP: MOMENTUM-R                               6.1140
  20  TSTEP: MG INIT                                  0.0000
  21  TSTEP: TIP GAP                                  0.0010
- 22  TSTEP: FEXTRAP                                  0.0220
- 23  TSTEP: DELTA/STORE                              2.2310
- 24  TSTEP: PITCH AVG                                0.0110
- 25  TSTEP: MG AGG                                   2.2000
- 26  TSTEP: STEP/DAMP                                3.5550
+ 22  TSTEP: FEXTRAP                                  0.0230
+ 23  TSTEP: DELTA/STORE                              5.5150
+ 24  TSTEP: PITCH AVG                                0.0100
+ 25  TSTEP: MG AGG                                   3.2920
+ 26  TSTEP: STEP/DAMP                                5.3230
  27  TSTEP: SA SPECIAL                               0.0000
- 28  TSTEP: CELL->NODE                               1.9660
- 29  TSTEP: SMOOTH_VAR                               7.2810
- 30  TSTEP: FINAL AVG                                0.1130
- 31  TSTEP: PITCH AVG POST-MG                        0.0110
+ 28  TSTEP: CELL->NODE                               3.5870
+ 29  TSTEP: SMOOTH_VAR                              12.5100
+ 30  TSTEP: FINAL AVG                                0.2870
+ 31  TSTEP: PITCH AVG POST-MG                        0.0080
  32  LOOP: SA FLUX SETUP                             0.0000
- 33  LOOP: MASS FLUX RFLUX                           0.3990
+ 33  LOOP: MASS FLUX RFLUX                           1.1320
  34  LOOP: Q3D BODY FORCE                            0.0000
- 35  LOOP: ZERO MASS HUB/CASING                      0.0040
+ 35  LOOP: ZERO MASS HUB/CASING                      0.0190
  36  LOOP: BLEED HUB/CASING                          0.0000
  37  LOOP: COOLANT MASS FLUX                         0.0000
  38  LOOP: SHROUD MASS FLUX                          0.0000
- 39  LOOP: ENERGY FLUX/SOURCE                        0.9440
- 40  LOOP: MOMENTUM FLUX BUILD                       3.7620
- 41  MAIN: TOTAL WALL TIME                          51.4830
- 42  SMOOTH_VAR: STREAMWISE CORE                     1.2230
- 44  SMOOTH_VAR: LEADING EDGE                        0.0080
- 45  SMOOTH_VAR: RESET D                             0.6770
- 46  SMOOTH_VAR: PITCH/SPANWISE                      5.3420
- 47  SMOOTH_VAR: EXIT FLOW                           0.0270
- 48  LOOP: VRMS/VMAX (E5)                            0.0840
+ 39  LOOP: ENERGY FLUX/SOURCE                        2.3250
+ 40  LOOP: MOMENTUM FLUX BUILD                       9.4700
+ 41  MAIN: TOTAL WALL TIME                          79.6310
+ 42  SMOOTH_VAR: STREAMWISE CORE                     2.4400
+ 44  SMOOTH_VAR: LEADING EDGE                        0.0100
+ 45  SMOOTH_VAR: RESET D                             1.7790
+ 46  SMOOTH_VAR: PITCH/SPANWISE                      8.2460
+ 47  SMOOTH_VAR: EXIT FLOW                           0.0320
+ 48  LOOP: VRMS/VMAX (E5)                            0.1090
  49  LOOP: TFLOW ADDITION                            0.0000
  50  LOOP: INV START/END OUT                         0.0000
- 51  LOOP: NO-INV SURF ZERO                          0.0580
+ 51  LOOP: NO-INV SURF ZERO                          0.1470
  52  LOOP: BLEED SURF FLUX                           0.0000
  53  LOOP: CELL AVG DENSITY                          0.0000
  54  LOOP: TABSEARCH                                 0.0000
  55  LOOP: TABINTERP                                 0.0000
+ 56  CELL->NODE: PH1 INTERIOR                        2.5040
+ 57  CELL->NODE: PH2 BOUNDARY                        1.0820
+ 58  MOMFLUX: VX PARALLEL DO                         2.9680
+ 59  MOMFLUX: VX SINGLE                              0.2400
+ 60  MOMFLUX: VT PARALLEL DO                         2.1740
+ 61  MOMFLUX: VT SINGLE                              0.0480
+ 62  MOMFLUX: VR PARALLEL DO                         0.0000
+ 63  MOMFLUX: VR SINGLE                              0.0000
+ 64  LOOP: DENSITY CHECK                             0.2980
+ 65  LOOP: MACH CHECK                                1.0960
+ 66  LOOP: MIXPLAN                                   0.0700
+ 67  LOOP: TE SEPARATION                             0.0000
+ 68  LOOP: EVERY 5 STEPS                             1.7840
+ 69  5STP: BLADE_FLOW CALC                           0.0540
+ 70  5STP: EMAX/EAVG CALC                            0.2090
+ 71  5STP: STEPUP                                    0.3440
+ 72  5STP: ECONT CALC                                0.0000
+ 73  5STP: OUTPUT/LOSS                               1.0110
+ 74  5STP: EFICOOL                                   0.0920
+ 75  5STP: SUMMARY I/O                               0.0720
  ========================================================
