@@ -3781,6 +3781,8 @@ C
 C
       DIMENSION CHECK_FLOW(JD),BLADE_FLOW(JD),ROVMSQ(KD),ANG_INC(KD),
      &          P_PSURF(JD),P_SSURF(JD),SFRAC(JD)
+      REAL T_REL_M_MAX
+      INTEGER T_IMACH, T_JMACH, T_KMACH
 
       INTEGER T_LOOP_TOTAL, T_LOOP_COOL_BLEED, T_LOOP_INV_INPUT
       INTEGER T_LOOP_SMOOTH, T_LOOP_VEL, T_LOOP_PRES
@@ -3789,6 +3791,12 @@ C
       INTEGER T_LOOP_ZERO_MASS, T_LOOP_BLEED_SURF, T_LOOP_COOL_MASS
       INTEGER T_LOOP_SHROUD_MASS, T_LOOP_SA_FLUX
       INTEGER T_LOOP_ENERGY_FLUX, T_LOOP_MOM_FLUX
+      INTEGER T_MOMF_VX_DO, T_MOMF_VX_SGL
+      INTEGER T_MOMF_VT_DO, T_MOMF_VT_SGL
+      INTEGER T_MOMF_VR_DO, T_MOMF_VR_SGL
+      INTEGER T_LOOP_DNSCHECK, T_LOOP_MACHCHECK
+      INTEGER T_LOOP_MIXPLAN, T_LOOP_TESEP
+      INTEGER T_LOOP_CONV5STP
       INTEGER T_MAIN_TOTAL
       INTEGER T_LOOP_VRMS, T_LOOP_TFLOW, T_LOOP_INVSTEND
       INTEGER T_LOOP_NOINVZERO, T_LOOP_BLEED_SURF2
@@ -3828,6 +3836,17 @@ C
       PARAMETER (T_LOOP_NOINVZERO=51)
       PARAMETER (T_LOOP_BLEED_SURF2=52)
       PARAMETER (T_LOOP_CELLAVG=53)
+      PARAMETER (T_MOMF_VX_DO=58)
+      PARAMETER (T_MOMF_VX_SGL=59)
+      PARAMETER (T_MOMF_VT_DO=60)
+      PARAMETER (T_MOMF_VT_SGL=61)
+      PARAMETER (T_MOMF_VR_DO=62)
+      PARAMETER (T_MOMF_VR_SGL=63)
+      PARAMETER (T_LOOP_DNSCHECK=64)
+      PARAMETER (T_LOOP_MACHCHECK=65)
+      PARAMETER (T_LOOP_MIXPLAN=66)
+      PARAMETER (T_LOOP_TESEP=67)
+      PARAMETER (T_LOOP_CONV5STP=68)
 
       COMMON /TABTIME/ ITABTIME, TS_CNT
 
@@ -5861,6 +5880,7 @@ C       CALCULATE FLUXES FOR THE AXIAL-MOMENTUM EQUATION.
 C*******************************************************************************
 C******************************************************************************
       CALL TIMER_START(T_LOOP_MOM_FLUX)
+      CALL TIMER_START(T_MOMF_VX_DO)
 C$OMP PARALLEL DEFAULT(NONE)
 C$OMP&PRIVATE(I,J,K,NC,AVGP,AVGVX,AVGPCUSP,AVGVXCUSP)
 C$OMP&SHARED(KMM1,KM,JM,IMM1,IM,
@@ -5916,6 +5936,13 @@ C$OMP SIMD
  6120 CONTINUE
 C$OMP END DO
 C
+C     Timing: end DO section, start SINGLE section
+C$OMP MASTER
+      CALL TIMER_STOP(T_MOMF_VX_DO)
+      CALL TIMER_START(T_MOMF_VX_SGL)
+C$OMP END MASTER
+C$OMP BARRIER
+C
 C     ADD COOLANT AXIAL MOMENTUM FLUXES THROUGH BLADES
 C
 C$OMP SINGLE
@@ -5967,6 +5994,7 @@ C
       IF(IFSHROUD.EQ.1)  CALL SHROUDFLUX(SHROUDVX)
 C$OMP END SINGLE
 C$OMP END PARALLEL
+      CALL TIMER_STOP(T_MOMF_VX_SGL)
 C
 C******************************************************************************
 C******************************************************************************
@@ -5983,6 +6011,7 @@ C       CALCULATE FLUXES FOR MOMENT OF MOMENTUM EQUATION.
 C******************************************************************************
 C
       CALL TIMER_START(T_LOOP_MOM_FLUX)
+      CALL TIMER_START(T_MOMF_VT_DO)
 C$OMP PARALLEL DEFAULT(NONE)
 C$OMP&PRIVATE(I,J,K,NC,AVGR,AVGVT,AVGP)
 C$OMP&SHARED(KMM1,KM,JM,IMM1,IM,
@@ -6038,6 +6067,13 @@ C$OMP SIMD
  6230 CONTINUE
 C$OMP END DO
 C
+C     Timing: end DO section, start SINGLE section
+C$OMP MASTER
+      CALL TIMER_STOP(T_MOMF_VT_DO)
+      CALL TIMER_START(T_MOMF_VT_SGL)
+C$OMP END MASTER
+C$OMP BARRIER
+C
 C      BALANCE FLUXES OF ANGULAR MOMENTUM ACROSS PERIODIC BOUNDARIES
 C
 C$OMP SINGLE
@@ -6084,6 +6120,7 @@ C
       IF(IFSHROUD.EQ.1) CALL SHROUDFLUX(SHROUDRVT)
 C$OMP END SINGLE
 C$OMP END PARALLEL
+      CALL TIMER_STOP(T_MOMF_VT_SGL)
 C
 C*******************************************************************************
 C******************************************************************************
@@ -6239,23 +6276,45 @@ C******************************************************************************
 C
 C      CHECK FOR ANY VERY STEEP STREAMWISE DENSITY GRADIENTS OR ANY VERY LOW DENSITIES..
 C
+      CALL TIMER_START(T_LOOP_DNSCHECK)
+C$OMP PARALLEL DO DEFAULT(NONE)
+C$OMP&PRIVATE(I,J,K,ROAVG)
+C$OMP&SHARED(KM,JM,IM,RO,ROLIM)
+C$OMP&SCHEDULE(STATIC)
       DO 7200 K=1,KM
       DO 7200 J=3,JM-3
+C$OMP SIMD
       DO 7200 I=1,IM
       ROAVG = 0.25*(RO(I,J-2,K)+RO(I,J-1,K)+RO(I,J+1,K)+RO(I,J+2,K))
       IF(RO(I,J,K).LT.0.6*ROAVG) RO(I,J,K) = 0.5*(RO(I,J,K)+0.6*ROAVG)
       IF(RO(I,J,K).GT.1.5*ROAVG) RO(I,J,K) = 0.5*(RO(I,J,K)+1.5*ROAVG)
       IF(RO(I,J,K).LT.ROLIM) RO(I,J,K) = 0.5*(RO(I,J,K) + ROLIM)
  7200 CONTINUE
+C$OMP END PARALLEL DO
+      CALL TIMER_STOP(T_LOOP_DNSCHECK)
 C
 C******************************************************************************
 C  CHECK FOR ANY VERY HIGH MACH NUMBERS - LIMIT = MACHLIM
+C
+      CALL TIMER_START(T_LOOP_MACHCHECK)
 C
 C    CHECK AND APPLY LIMITS TO BOTH THE RELATIVE MACH NUMBER AND RELATIVE MASS FLUX .
 C    THIS MODIFIED BY JDD  MAY 2021 .
 C
       REL_M_MAX = 0.0
       GANOW     = GA
+C$OMP PARALLEL DEFAULT(NONE)
+C$OMP&PRIVATE(I,J,K,GANOW,RONOW,WRELSQ,WREL,WSOUND,RELMACH,
+C$OMP&FACSAFE,ROVTREL,T_REL_M_MAX,T_IMACH,T_JMACH,T_KMACH)
+C$OMP&SHARED(KM,JM,IM,IFGAS,GA,GA_PV,RO,ROLIM,
+C$OMP&VX,VR,WT,P,MACHLIM,ROVX,ROVR,ROWT,ROVT,RORVT,UBLADE,R)
+C$OMP&SHARED(REL_M_MAX,IMACH,JMACH,KMACH)
+      T_REL_M_MAX = 0.0
+      T_IMACH = 0
+      T_JMACH = 0
+      T_KMACH = 0
+      GANOW = GA
+C$OMP DO SCHEDULE(STATIC)
       DO 7100 K=1,KM
       DO 7100 J=1,JM
       DO 7100 I=1,IM
@@ -6267,11 +6326,11 @@ C
       WREL        = SQRT(WRELSQ)
       WSOUND      = SQRT(GANOW*P(I,J,K)/RONOW)
       RELMACH     = WREL/WSOUND
-      IF(RELMACH.GT.REL_M_MAX) THEN
-      REL_M_MAX = RELMACH
-      IMACH  = I
-      JMACH  = J
-      KMACH  = K
+      IF(RELMACH.GT.T_REL_M_MAX) THEN
+      T_REL_M_MAX = RELMACH
+      T_IMACH  = I
+      T_JMACH  = J
+      T_KMACH  = K
       END IF
       FACSAFE     = MACHLIM/RELMACH
       IF(FACSAFE.LT.1.0) THEN
@@ -6284,14 +6343,27 @@ C
       END IF
 C
  7100 CONTINUE
+C$OMP END DO
+C$OMP CRITICAL
+      IF(T_REL_M_MAX.GT.REL_M_MAX) THEN
+         REL_M_MAX = T_REL_M_MAX
+         IMACH = T_IMACH
+         JMACH = T_JMACH
+         KMACH = T_KMACH
+      END IF
+C$OMP END CRITICAL
+C$OMP END PARALLEL
+      CALL TIMER_STOP(T_LOOP_MACHCHECK)
 C
 C******************************************************************************
 C******************************************************************************
 C     CALL SUBROUTINE NEW_MIXPLAN TO TRANSFER THE FLOW ACROSS THE MIXING PLANES
 C
+      CALL TIMER_START(T_LOOP_MIXPLAN)
       IF(IM.GT.2) THEN
            IF(IFMIX.GT.0.AND.RFMIX.GT.1.0E-3) CALL NEW_MIXPLAN
       END IF
+      CALL TIMER_STOP(T_LOOP_MIXPLAN)
 C
 C******************************************************************************
 C******************************************************************************
@@ -6299,6 +6371,7 @@ C      FORCE THE TRAILING EDGE SEPARATION POINTS IF  "IF_CUSP" = 2
 C******************************************************************************
 C******************************************************************************
 C
+      CALL TIMER_START(T_LOOP_TESEP)
            DO 7355 NR = 1,NROWS
 C
        IF(IF_CUSP(NR).EQ.2) THEN
@@ -6349,6 +6422,7 @@ C
        END IF
 C
  7355      CONTINUE
+      CALL TIMER_STOP(T_LOOP_TESEP)
 C
 C******************************************************************************
 C*********************  END OF THE MAIN TIME STEPPING LOOP ********************
@@ -6368,6 +6442,7 @@ C      THE REMAINDER OF THIS SUB PROGRAM IS ONLY EXECUTED EVERY 5 STEPS
 C****************************************************************************
 C
  8000 CONTINUE
+      CALL TIMER_START(T_LOOP_CONV5STP)
 C
 C       EVERY FIVE TIME STEPS CHECK CONVERGENCE AND PRINT OUT SUMMARY TO UNITS 4 AND 6
 C
@@ -6615,6 +6690,7 @@ C    CALL MIX_BCONDS TO WRITE OUT THE PITCHWISE AVERAGE VALUES AT THE MIXING PLA
 C
       IF(IFEND.EQ.1) THEN
       CALL MIX_BCONDS(1)
+      CALL TIMER_STOP(T_LOOP_CONV5STP)
       CALL TIMER_STOP(T_MAIN_TOTAL)
       CALL TIMER_STOP(T_LOOP_TOTAL)
       CALL TIMER_REPORT
@@ -6624,6 +6700,8 @@ C*******************************************************************************
 C*********STOP IF CONVERGED OR MAXIMUM ITERATIONS REACHED**********
 C
       IF(IFEND.EQ.1) STOP
+C
+      CALL TIMER_STOP(T_LOOP_CONV5STP)
 C
 C********************** RETURN TO START OF MAIN LOOP ************
 C**************  IF NOT YET CONVERGED OR AT LAST ITERATION ******
@@ -19923,7 +20001,7 @@ C******************************************************************************
 
        SUBROUTINE TIMER_INIT
       INTEGER NT
-      PARAMETER (NT=57)
+      PARAMETER (NT=68)
        DOUBLE PRECISION TSTART, TACCUM
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
        INTEGER I
@@ -19940,7 +20018,7 @@ C******************************************************************************
        SUBROUTINE TIMER_START(ID)
        INTEGER ID
       INTEGER NT
-      PARAMETER (NT=57)
+      PARAMETER (NT=68)
        DOUBLE PRECISION TSTART, TACCUM, NOW
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -19954,7 +20032,7 @@ C******************************************************************************
        SUBROUTINE TIMER_STOP(ID)
        INTEGER ID
       INTEGER NT
-      PARAMETER (NT=57)
+      PARAMETER (NT=68)
        DOUBLE PRECISION TSTART, TACCUM, NOW
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -19968,7 +20046,7 @@ C******************************************************************************
             SUBROUTINE TIMER_ACCUM(ID, DT)
             INTEGER ID
             INTEGER NT
-            PARAMETER (NT=57)
+            PARAMETER (NT=68)
             DOUBLE PRECISION TSTART, TACCUM, DT
             COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -19980,7 +20058,7 @@ C******************************************************************************
 
        SUBROUTINE TIMER_REPORT
       INTEGER NT
-      PARAMETER (NT=57)
+      PARAMETER (NT=68)
        DOUBLE PRECISION TSTART, TACCUM
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
       CHARACTER*40 NAME(NT)
@@ -20043,6 +20121,17 @@ C******************************************************************************
                   DATA NAME(55) /'LOOP: TABINTERP'/
                   DATA NAME(56) /'CELL->NODE: PH1 INTERIOR'/
                   DATA NAME(57) /'CELL->NODE: PH2 BOUNDARY'/
+                  DATA NAME(58) /'MOMFLUX: VX PARALLEL DO'/
+                  DATA NAME(59) /'MOMFLUX: VX SINGLE'/
+                  DATA NAME(60) /'MOMFLUX: VT PARALLEL DO'/
+                  DATA NAME(61) /'MOMFLUX: VT SINGLE'/
+                  DATA NAME(62) /'MOMFLUX: VR PARALLEL DO'/
+                  DATA NAME(63) /'MOMFLUX: VR SINGLE'/
+                  DATA NAME(64) /'LOOP: DENSITY CHECK'/
+                  DATA NAME(65) /'LOOP: MACH CHECK'/
+                  DATA NAME(66) /'LOOP: MIXPLAN'/
+                  DATA NAME(67) /'LOOP: TE SEPARATION'/
+                  DATA NAME(68) /'LOOP: CONV CHECK (5STP)'/
 
        WRITE(4,*)
        WRITE(4,*) '================ WALL TIME SUMMARY (s) ================'

@@ -69,3 +69,71 @@ Phase 2 の3つのループ（K面, I面, J面）をそれぞれ2つに分割し
 ### 次のアクション
 - AWS ベンチマーク（8コア）で CELL->NODE のスケーリングを確認
 - 他の TSTEP サブセクション（MG AGG 4.63s, SMOOTH_VAR 14.75s）の最適化検討
+
+---
+
+## DENSITY CHECK / MACH CHECK の並列化
+
+### 対象
+- DENSITY CHECK: `T_LOOP_DNSCHECK` (ID=64), L6275〜L6283, OMP=1: 0.275s
+- MACH CHECK: `T_LOOP_MACHCHECK` (ID=65), L6288〜L6323, OMP=1: 1.038s
+
+### 変更内容
+
+#### 1. DENSITY CHECK (ID=64) の並列化
+- K ループを `C$OMP PARALLEL DO` で並列化、I ループに `C$OMP SIMD` を付加
+- K 方向は完全独立（J 方向ステンシルだが K 間は非依存）
+- 変数分類: PRIVATE(I,J,K,ROAVG), SHARED(KM,JM,IM,RO,ROLIM)
+
+#### 2. MACH CHECK (ID=65) の並列化
+- K ループを `C$OMP PARALLEL` + `C$OMP DO` で並列化
+- REL_M_MAX/IMACH/JMACH/KMACH のグローバル最大値追跡 → スレッドローカル変数 (T_REL_M_MAX, T_IMACH, T_JMACH, T_KMACH) + `C$OMP CRITICAL` で統合
+- ローカル変数 4 つを宣言追加
+
+#### 3. OPENMP_PLAN 文書作成
+- `dev/docs/OPENMP_PLAN_DENSITY_CHECK.md` — データ依存性分析・変数分類・リスク評価
+- `dev/docs/OPENMP_PLAN_MACH_CHECK.md` — CRITICAL パターン・GANOW の扱い・SIMD 見送り理由
+
+### 性能結果（ローカル i5-12400F, 100ステップ）
+
+| セクション | OMP=1 | OMP=2 | OMP=4 | スケーリング (1→4) |
+|---|---|---|---|---|
+| DENSITY CHECK | 0.275s | 0.175s | 0.117s | 2.35x |
+| MACH CHECK | 1.038s | 0.724s | 0.527s | 1.97x |
+
+### 数値検証
+- OMP=1/2/4 すべてで EMAX/EAVG/ECONT/FLOW が変更前と完全一致
+
+---
+
+## 追加タイマー (ID=66〜68) の導入
+
+### 対象
+- ID=66: `LOOP: MIXPLAN` — 混合面処理
+- ID=67: `LOOP: TE SEPARATION` — TE 分離処理
+- ID=68: `LOOP: CONV CHECK (5STP)` — 5 ステップごとの収束判定（8000 CONTINUE ブロック）
+
+### 結果 (OMP=1)
+- CONV CHECK (5STP): 3.27s（LOOP TOTAL の約 5.8%）→ 次の並列化候補
+
+---
+
+## copilot-instructions.md の改訂
+
+### 変更内容
+- §3: タイトルを「コンパイル・実行の受け入れ条件」→「コンパイル・実行の基本設定」に変更。OMP_WAIT_POLICY=PASSIVE 等の実行時設定を追加
+- §4: **全面差し替え** — 旧「コード変更後の検証手順」を「並列化ワークフロー」（8ステップ）に統合
+  - ステップ 1: 計算時間の細分化計測（MASTER+BARRIER パターン明記）
+  - ステップ 2: OPENMP_PLAN テンプレート構造の標準化（6セクション構成）
+  - ステップ 3: ユーザによる方針決定（ブラッシュアップ / 確定 / 深掘り）
+  - ステップ 4: コード修正
+  - ステップ 5: 計算実行と数値検証（OMP=1 の EMAX/EAVG 一致確認を明示）
+  - ステップ 6: 区間別の計算時間比較
+  - ステップ 7: 効果分析と次のアクション提案（revert も選択肢として明記）
+  - ステップ 8: ユーザの指示
+- §6: OPENMP_PLAN_*.md をファイル構成に追加
+
+### 次のアクション
+- MOM FLUX BUILD のループ融合最適化（最大残ボトルネック、OMP=4 で 5.0s）
+- CONV CHECK (5STP) の並列化（3.27s @ OMP=1）
+- AWS ベンチマークでの全体スケーリング確認
