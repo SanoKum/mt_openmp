@@ -143,6 +143,105 @@ TSTEP（DENSITY/ENERGY/MOMENTUM 等）のコードは 02-11 → 02-14 で**一�
 
 ---
 
+## タイマー計測版 (timer original) の修正と検証
+
+### 背景
+- 旧タイマー版 (`multall-open-21.3_timer.f`, NT=53) が AWS 上で 1000 ステップ実行時にステップ 905 で発散（NaN）
+- 純粋オリジナル (`multall-open-21.3.f`) はローカルで 1000 ステップ完走、数値も正常
+- 開発版 (dev, OMP=1) も 1000 ステップ正常完走
+- 原因: 旧タイマー版は NT=53 で開発版 (NT=75) との ID 不整合あり、タイマーインフラを最新化して再構築
+
+### 変更内容
+
+#### 1. タイマーインフラの更新 (NT=53→75)
+- `PARAMETER (NT=53)` → `PARAMETER (NT=75)` （4箇所: TIMER_INIT, START, STOP, REPORT）
+- `TSTART(53)/TACCUM(53)` → `TSTART(75)/TACCUM(75)`
+- `DATA NAME(54)〜NAME(75)` を追加（開発版と同一の22タイマー名）
+- SUBROUTINE LOOP 内に PARAMETER/INTEGER 宣言を追加（ID=64〜75）
+
+#### 2. TIMER_START/STOP 呼び出しの挿入 (ID=64〜75)
+以下の12セクションに計26箇所の TIMER_START/STOP を挿入:
+
+| ID | 名称 | 内容 |
+|---|---|---|
+| 64 | T_LOOP_DNSCHECK | 密度勾配チェックループ |
+| 65 | T_LOOP_MACHCHECK | マッハ数チェックループ |
+| 66 | T_LOOP_MIXPLAN | 混合面処理 |
+| 67 | T_LOOP_TESEP | TE 分離点処理 |
+| 68 | T_LOOP_CONV5STP | 5ステップ毎収束チェック全体 (STOP 2箇所) |
+| 69 | T_CONV5_BLADEFLOW | ブレード流量計算 |
+| 70 | T_CONV5_EMAXEAVG | EMAX/EAVG 計算 |
+| 71 | T_CONV5_STEPUP | STEPUP タイムステップ更新 |
+| 72 | T_5STP_ECONT | ECONT 計算 |
+| 73 | T_5STP_OUTPUT | OUTPUT/LOSS 出力 |
+| 74 | T_5STP_EFICOOL | EFICOOL 効率計算 |
+| 75 | T_5STP_IO | サマリー I/O |
+
+#### 3. Makefile 更新
+- `build_timer` ターゲットを追加（`make build_timer`）
+- バイナリ: `../bin/multall-open21.3-timer`
+
+### 検証結果
+
+#### 1000 ステップ実行（ローカル i5-12400F）
+- **全 1000 ステップ完走、発散なし**
+
+#### 数値検証 — 収束指標 (stage.log)
+純粋オリジナルとの stage.log diff: **差異なし（bit-for-bit 一致）**
+
+| 指標 (STEP 1000) | 純粋オリジナル | タイマー版 |
+|---|---|---|
+| EMAX | 0.39932 | 0.39932 |
+| EAVG | 0.01830 | 0.01830 |
+| ECONT | 0.21457 | 0.21457 |
+| FLOW | 135.30 | 135.30 |
+
+#### 数値検証 — 全体性能 (compare_performance.sh)
+
+| 指標 | 純粋オリジナル | タイマー版 | Rel. Diff |
+|---|---|---|---|
+| PR | 9.86742973 | 9.86742973 | 0.000000% |
+| eta_TT | 0.816291749 | 0.816291749 | 0.000000% |
+| eta_TS | 0.774164438 | 0.774164438 | 0.000000% |
+| Power (kW) | 40372.1641 | 40372.1641 | 0.000000% |
+| Flow In | 135.163040 | 135.163040 | 0.000000% |
+| Flow Out | 110.514687 | 110.514687 | 0.000000% |
+
+**全項目 0.000000% — 完全一致**
+
+#### タイマーレポート (1000 ステップ, ローカル)
+
+| ID | セクション | 時間 (s) | LOOP 占有率 |
+|---|---|---:|---:|
+| 4 | LOOP: TOTAL | 613.38 | 100% |
+| 29 | TSTEP: SMOOTH_VAR | 116.69 | 19.0% |
+| 40 | LOOP: MOM FLUX BUILD | 86.46 | 14.1% |
+| 9 | LOOP: PRESSURE/TEMP | 79.86 | 13.0% |
+| 14 | TSTEP: DENSITY | 58.25 | 9.5% |
+| 16 | TSTEP: ENERGY | 56.70 | 9.2% |
+| 17 | TSTEP: MOMENTUM-X | 56.55 | 9.2% |
+| 18 | TSTEP: MOMENTUM-T | 56.35 | 9.2% |
+| 19 | TSTEP: MOMENTUM-R | 56.30 | 9.2% |
+| 26 | TSTEP: STEP/DAMP | 53.35 | 8.7% |
+| 23 | TSTEP: DELTA/STORE | 50.42 | 8.2% |
+| 28 | TSTEP: CELL->NODE | 42.63 | 6.9% |
+| 10 | LOOP: VISCOUS/TURB | 42.89 | 7.0% |
+| 11 | LOOP: MASS FLUX | 31.13 | 5.1% |
+| 68 | LOOP: EVERY 5 STEPS | 28.04 | 4.6% |
+| 71 | 5STP: STEPUP | 23.63 | 3.9% |
+| 25 | TSTEP: MG AGG | 18.20 | 3.0% |
+| 65 | LOOP: MACH CHECK | 10.91 | 1.8% |
+
+### 変更ファイル
+- `dev/src/multall-open-21.3_timer.f` — NT=75 化、ID=64〜75 のタイマー計装追加（19,657 行）
+- `dev/src/Makefile` — `build_timer` ターゲット追加
+
+### 次のアクション
+- AWS でタイマー版 1000 ステップテスト（旧版は step 905 で発散 → 新版で再現しないか確認）
+- タイマー版の AWS 結果をベースラインとして、開発版との区間別比較に使用
+
+---
+
 ### 現在の速度向上状況
 
 #### ローカル (i5-12400F 6C/12T, 100ステップ)

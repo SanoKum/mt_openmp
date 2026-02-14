@@ -3,6 +3,8 @@ SRC = multall-open21.3-s1.0.f
 BIN = ../bin/multall-open21.3-s
 SRC_ORIG = multall-open-21.3.f
 BIN_ORIG = ../bin/multall-open21.3-original
+SRC_TIMER = multall-open-21.3_timer.f
+BIN_TIMER = ../bin/multall-open21.3-timer
 FFLAGS = -fopenmp -O3 -ffast-math -funroll-loops -march=native -mtune=native \
 	-ffixed-line-length-none -mcmodel=large
 FFLAGS_ORIG = -O3 -ffast-math -funroll-loops -march=native -mtune=native \
@@ -21,11 +23,13 @@ OUT_OMP2 = run_smoothvar_omp2.out
 STAGE_LOG = stage.log
 OMP_ENV = OMP_PROC_BIND=true OMP_PLACES=cores OMP_WAIT_POLICY=PASSIVE
 
-.PHONY: build build_original build_ifx run_omp2 clean
+.PHONY: build build_original build_timer build_ifx run_omp2 clean
 
 build: $(BIN)
 
 build_original: $(BIN_ORIG)
+
+build_timer: $(BIN_TIMER)
 
 $(BIN): $(SRC)
 	$(FC) $(FFLAGS) $(VECFLAGS) -o $@ $<
@@ -33,8 +37,11 @@ $(BIN): $(SRC)
 $(BIN_ORIG): $(SRC_ORIG)
 	$(FC) $(FFLAGS_ORIG) $(VECFLAGS) -o $@ $<
 
+$(BIN_TIMER): $(SRC_TIMER)
+	$(FC) $(FFLAGS_ORIG) $(VECFLAGS) -o $@ $<
+
 clean:
-	rm -f $(BIN) $(BIN_ORIG) $(BIN_IFX) vec.log vec-ifx.log
+	rm -f $(BIN) $(BIN_ORIG) $(BIN_TIMER) $(BIN_IFX) vec.log vec-ifx.log
 
 build_ifx: $(BIN_IFX)
 
