@@ -156,8 +156,34 @@ LOOP: TOTAL は 123.7s → 129.6s と悪化しているが、他セクション�
 
 (*) OMP=8 は FINAL AVG fix 時点の値。COLLAPSE(2) の実測は 129.6s だが AWS ノイズによる変動含む。MG AGG 単体は 9.04s→7.56s で改善確認済み。
 
+---
+
+## フルベンチマークスクリプトの作成と実行試行
+
+### 目的
+最新コード（FINAL AVG fix + MG AGG COLLAPSE(2)）で、two-stg と HP Steam の両ケースを original/OMP=1/2/4/8 で AWS 上でフルコンバージェンス計算し、包括的な速度比較を行う。
+
+### スクリプト
+- `dev/scripts/run_full_benchmark.sh` を作成
+- two-stg: `two-stg-LP-ST+steam-10000stp.dat` (NSTEPS=10000, CONLIM=0.001, ~6976ステップ収束)
+- HP Steam: `hp-steam-turb.dat` (NSTEPS=9000, CONLIM=0.0005, ~5680ステップ収束)
+- original → OMP=1 → OMP=2 → OMP=4 → OMP=8 の順に実行
+- 推定所要時間: two-stg ~4時間10分 + HP Steam ~34分 = 約4時間45分
+
+### 実行結果: 失敗
+- original バイナリが `/dev/tty` を開いて Y/N プロンプトを出すため、非対話 SSH ではプロンプトが動作しない
+- `set -e` により original 失敗時点でスクリプト停止 → 新しいファイルが一切作成されず
+- サマリー部分の glob が旧ファイル (20260215_1642) にマッチし、古い結果が表示された
+
+### 修正
+- `script -qc "echo Y | ..."` で pseudo-tty を提供する方式に変更
+- `|| true` で original 失敗時もスクリプトが継続するよう修正
+- 修正済みスクリプトは AWS に再転送して再実行が必要
+
+---
+
 ### 次のアクション
-- HP Steam OMP=8 の安定した全体計測（ノイズの少ない条件で再実行）
+- 修正済み `run_full_benchmark.sh` を AWS に転送して再実行
 - SMOOTH_VAR (21.6s, 最大ボトルネック) の改善検討
 - STEP/DAMP は COLLAPSE(2) 適用の余地あり（DO 1502 の K×J 結合、数値差なし）
 - CELL->NODE (11.0s) のスケーリング改善検討
