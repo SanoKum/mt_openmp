@@ -430,11 +430,14 @@ TSTEP（DENSITY/ENERGY/MOMENTUM 等）のコードは 02-11 → 02-14 で**一�
 | LOOP: TOTAL | 54.42s | 52.94s | 37.33s | 31.32s |
 | 対 original | — | 1.03x | 1.46x | 1.74x |
 
-#### AWS (c7i 8C/16T, 100ステップ) — 02-15 計測
+#### AWS (c7i 8C/16T, 100ステップ) — 02-15 計測 (1149, SETUP並列化後)
 | | original | OMP=1 | OMP=2 | OMP=4 | OMP=8 |
 |---|---|---|---|---|---|
-| LOOP: TOTAL | 80.11s | 77.05s | 40.82s | 22.72s | 13.83s |
-| 対 original | — | 1.04x | 1.96x | 3.53x | **5.79x** |
+| LOOP: TOTAL | 81.11s | 76.01s | 39.90s | 22.11s | 13.33s |
+| 対 original | — | 1.07x | 2.03x | 3.67x | **6.09x** |
+| MAIN: SETUP | 21.12s | 20.30s | 11.76s | 6.87s | 4.57s |
+| MAIN: TOTAL | 102.25s | 96.32s | 51.67s | 28.99s | **17.91s** |
+| TOTAL 対 orig | — | 1.06x | 1.98x | 3.53x | **5.71x** |
 
 #### AWS (c7i 8C/16T, 10000ステップ → 6976ステップ収束)
 | | Timer | OMP=1 | OMP=4 | OMP=8 |
@@ -511,7 +514,61 @@ OMP=1 で約1秒の削減はアルゴリズム最適化による純粋な計算�
   - SET_XLENGTH サブルーチン: Plan A (OpenMP PARALLEL DO) + Plan B (ENDWALL_PRE 事前計算)
   - タイマーインフラ: NT=75→88, NAME(76)〜NAME(88) 追加
 
+### ステップ 4 — AWS ベンチマーク (100ステップ, c7i 8C/16T)
+
+#### SETUP タイミング — 前回 (SETUP 未並列化) vs 今回 (Plan A+B)
+
+| | 前回 (1050) | 今回 (1149) | 改善 |
+|---|---:|---:|---:|
+| SETUP OMP=1 | 20.80s | 20.30s | -2% |
+| SETUP OMP=2 | 20.76s | **11.76s** | **-43%** |
+| SETUP OMP=4 | 20.88s | **6.87s** | **-67%** |
+| SETUP OMP=8 | 20.50s | **4.57s** | **-78%** |
+
+前回は SETUP が完全にシリアル (~21s 固定) だったのが、SET_XLENGTH の並列化により OMP=8 で **4.57s (4.5x 高速化)**。
+
+#### SET_XLENGTH スケーリング (AWS)
+
+| OMP | SET_XLENGTH | 対 OMP=1 倍率 |
+|---:|---:|---:|
+| 1 | 17.91s | 1.00x |
+| 2 | 9.52s | 1.88x |
+| 4 | 4.74s | 3.78x |
+| 8 | **2.49s** | **7.19x** |
+
+8コアで 7.19x — ほぼ理想的なスケーリング。
+
+#### SETUP サブタイマー (OMP=8)
+
+| ID | セクション | OMP=1 | OMP=8 | 倍率 |
+|---|---|---:|---:|---:|
+| 86 | SET_XLENGTH | 17.91s | 2.49s | 7.19x |
+| **81** | **INIT VELOCITY** | **1.29s** | **1.25s** | **1.03x** |
+| 82 | MASS/FLUX INIT | 0.25s | 0.25s | 1.00x |
+| 87 | LOSS ROUTINES | 0.28s | 0.04s | 7.5x |
+| 85 | MULTIGRID | 0.22s | 0.22s | 1.00x |
+| 79 | AREAS | 0.21s | 0.20s | 1.03x |
+
+次のボトルネック: **INIT VELOCITY (1.25s)** — 完全にシリアル。
+
+#### MAIN: TOTAL (全体) の改善
+
+| | 前回 (1050) | 今回 (1149) | 改善 |
+|---|---:|---:|---:|
+| OMP=8 | 34.35s | **17.91s** | **-47.9%** |
+
+#### 数値検証
+- Original vs OMP=1: 全項目 Rel.Diff < 0.001% — **合格**
+- 収束指標: Original/OMP=1 完全一致 (EMAX=2.7797, EAVG=0.13162, ECONT=0.70818, FLOW=194.06)
+
+#### LOOP: TOTAL
+
+| | Original | OMP=1 | OMP=2 | OMP=4 | OMP=8 |
+|---|---:|---:|---:|---:|---:|
+| LOOP: TOTAL | 81.11s | 76.01s | 39.90s | 22.11s | **13.33s** |
+| 対 Orig 倍率 | — | 1.07x | 2.03x | 3.67x | **6.09x** |
+
 ### 次のアクション
+- SETUP: INIT VELOCITY (1.25s) の並列化検討
 - SET_XLENGTH の Plan C（翼面探索の事前計算）は効果が限定的のため保留
-- SETUP 内の他ボトルネック（INIT VELOCITY 0.81s, MASS/FLUX INIT 0.33s）の並列化検討
-- AWS での SETUP 含むフルベンチマーク
+- HP Steam Turbine テストケースの追加（別メッシュでの検証）
