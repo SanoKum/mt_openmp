@@ -7037,11 +7037,12 @@ C$OMP END MASTER
 C
 C     B1CHG gather: coarse cells accumulate fine STORE
 C     I1 innermost (21 iters, stride-1 write) for vectorization
-C$OMP DO SCHEDULE(STATIC)
+C     COLLAPSE(2): K1*J1 = 12*143 = 1716 iters (vs K1=12)
+C$OMP DO COLLAPSE(2) SCHEDULE(STATIC)
       DO K1=1,NKB1
+        DO J1=1,NJB1+1
         KSTART = (K1-1)*KR + 1
         KEND = MIN(K1*KR, KMM1)
-        DO J1=1,NJB1+1
           IF(JSTB1(J1).GT.0) THEN
             DO I1=1,NIB1
               ISTART = (I1-1)*IR + 1
@@ -7066,11 +7067,12 @@ C$OMP DO SCHEDULE(STATIC)
 C$OMP END DO
 C
 C     B2CHG gather from B1CHG (0.2MB vs 5.6MB STORE)
-C$OMP DO SCHEDULE(STATIC)
+C     COLLAPSE(2): K2*J2 = 4*48 = 192 iters (vs K2=4)
+C$OMP DO COLLAPSE(2) SCHEDULE(STATIC)
       DO K2=1,NKB2
+        DO J2=1,NJB2+1
         K1ST = (K2-1)*KRR + 1
         K1EN = MIN(K2*KRR, NKB1)
-        DO J2=1,NJB2+1
           IF(JSTB12(J2).GT.0) THEN
             DO I2=1,NIB2
               I1ST = (I2-1)*IRR + 1
@@ -7154,7 +7156,7 @@ C     OR LARGE.
 C
       IF(DAMP.GE.2.0.AND.DAMP.LE.100) THEN
 C
-C     CALCULATE THE AVERAGE CHANGES FOR EACH ROW, AVG_CHG(NR).
+C     CALCULATE THE AVERAGE CHANGES FOR EACH ROW,  AVG_CHG(NR).
 C
       DO 1501 NR = 1,NROWS
 C$OMP SINGLE
