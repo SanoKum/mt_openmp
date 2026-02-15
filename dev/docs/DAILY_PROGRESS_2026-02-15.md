@@ -442,3 +442,76 @@ TSTEP（DENSITY/ENERGY/MOMENTUM 等）のコードは 02-11 → 02-14 で**一�
 | LOOP: TOTAL | 5159s | 4981s | 1421s | 839s |
 | 対 Timer | — | 1.04x | 3.63x | **6.15x** |
 | 対 OMP=1 | — | — | 3.50x | **5.94x** |
+
+---
+
+## SETUP 高速化: SET_XLENGTH (壁面距離計算)
+
+### 背景
+SETUP 全体の計測で SET_XLENGTH が **14.82s / 16.98s = 87.3%** を占めるボトルネックと判明。
+SET_XLENGTH の DO 1000 ループは全格子点 (I,J,K) に対して最近壁面距離を計算する。
+
+### ステップ 1 — SETUP タイマー計装 (ID=76〜88)
+
+NT を 75→88 に拡張し、SETUP 内に 13 区間のタイマーを追加:
+
+| ID | 名称 | OMP=1 時間 (s) |
+|---|---|---:|
+| 76 | SETUP: CONST/INIT | 0.00 |
+| 77 | SETUP: INTPOL | 0.00 |
+| 78 | SETUP: GRID COORD | 0.03 |
+| 79 | SETUP: AREAS | 0.21 |
+| 80 | SETUP: INIT P/RO/T | 0.06 |
+| 81 | SETUP: INIT VELOCITY | 0.81 |
+| 82 | SETUP: MASS/FLUX INIT | 0.33 |
+| 83 | SETUP: RESTART FILE | 0.00 |
+| 84 | SETUP: TIMESTEP | 0.08 |
+| 85 | SETUP: MULTIGRID | 0.21 |
+| **86** | **SETUP: SET_XLENGTH** | **14.82** |
+| 87 | SETUP: LOSS ROUTINES | 0.27 |
+| 88 | SETUP: TFLOW | 0.00 |
+
+### ステップ 2 — Plan A: OpenMP PARALLEL DO (K ループ並列化)
+
+DO 1000 ループの最外 K ループに `C$OMP PARALLEL DO` を適用。各 (I,J,K) 点の壁面距離計算は独立しており、DIST_MIN(I,J,K) への書き込みも一意。XLIMIT(J) は I=IMID, K=KMID の場合のみ書き出し（1スレッドのみ通過）。
+
+**変数分類**: PRIVATE(K,J,I,NR,PITCH,DIST_REF,IWALL,J1,J2,K1,K2,JWALL,JSURF,KSURF,HUBDIST,TIPDIST,DMIN,DISTSQ,JMIN,KMIN,XDIF,RDIF,TDIF,TDIFSQ,ATOT,XNORM,RNORM,TNORM,KNORM,ENDWALL_DIST,IF_FOUND,SSDIST,PSDIST,BLADE_DIST,DISTSQRT,XLLIM), SHARED(KM,JM,IM,IMID,KMID,JRANGE,KRANGE,IBOUND,X,R,THETA,NROW,NBLADE,ASX,ASR,ABX,ABR,ABT,JLE,JTE,JSTART,JMIX,SMERID,XLLIM_IN,XLLIM_LE,XLLIM_TE,XLLIM_DN,DIST_MIN,XLIMIT)
+
+#### 結果
+
+| | OMP=1 | OMP=4 |
+|---|---:|---:|
+| SET_XLENGTH | 14.82s | **4.63s (3.20x)** |
+| SETUP 全体 | 16.98s | **6.68s (2.54x)** |
+
+数値検証: EMAX=2.7797, EAVG=0.13162, ECONT=0.70818, FLOW=194.06 — **完全一致**
+
+### ステップ 3 — Plan B: ハブ/ケーシング距離の事前計算
+
+DO 1000 の最内 I ループ内にあるハブ/ケーシング探索（DO 10, DO 15）は X(J,K), R(J,K) のみを使い、I に依存しない。にもかかわらず IM=64 回同一計算が繰り返されていた。
+
+**改善**: `ENDWALL_PRE(JD,KD)` ローカル配列を追加し、DO 1000 の前に Phase 1 ループ（OpenMP 並列）でハブ/ケーシング距離を事前計算。DO 1000 (Phase 2) ではルックアップ `ENDWALL_DIST = ENDWALL_PRE(J,K)` で置換。
+
+#### 結果
+
+| | Plan A のみ | Plan A + B |
+|---|---:|---:|
+| SET_XLENGTH OMP=1 | 14.82s | **13.79s (7% 削減)** |
+| SET_XLENGTH OMP=4 | 4.63s | **4.52s (2% 削減)** |
+| SETUP OMP=1 | 16.98s | **15.79s** |
+| SETUP OMP=4 | 6.68s | **6.22s** |
+
+数値検証: EMAX=2.7797, EAVG=0.13162, ECONT=0.70818, FLOW=194.06 — **完全一致**
+
+OMP=1 で約1秒の削減はアルゴリズム最適化による純粋な計算量削減。OMP=4 では並列化により探索コストが分散済みのため差は小さい。
+
+### 変更ファイル
+- `dev/src/multall-open21.3-s1.0.f`:
+  - SETUP サブルーチン: タイマー計装 (ID=76〜88)
+  - SET_XLENGTH サブルーチン: Plan A (OpenMP PARALLEL DO) + Plan B (ENDWALL_PRE 事前計算)
+  - タイマーインフラ: NT=75→88, NAME(76)〜NAME(88) 追加
+
+### 次のアクション
+- SET_XLENGTH の Plan C（翼面探索の事前計算）は効果が限定的のため保留
+- SETUP 内の他ボトルネック（INIT VELOCITY 0.81s, MASS/FLUX INIT 0.33s）の並列化検討
+- AWS での SETUP 含むフルベンチマーク

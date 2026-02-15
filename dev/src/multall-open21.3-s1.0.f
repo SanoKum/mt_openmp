@@ -8001,12 +8001,25 @@ C
 C
       CHARACTER*1 ANSW, ANS_IN
 C
+      INTEGER T_SETUP_CONST, T_SETUP_INTPOL, T_SETUP_GRID
+      INTEGER T_SETUP_AREAS, T_SETUP_INITPRO, T_SETUP_INITVEL
+      INTEGER T_SETUP_MASSFLX, T_SETUP_RESTART, T_SETUP_TSTEP
+      INTEGER T_SETUP_MULGRD, T_SETUP_XLENGTH, T_SETUP_LOSS
+      INTEGER T_SETUP_TFLOW
+      PARAMETER (T_SETUP_CONST=76, T_SETUP_INTPOL=77,
+     & T_SETUP_GRID=78, T_SETUP_AREAS=79, T_SETUP_INITPRO=80,
+     & T_SETUP_INITVEL=81, T_SETUP_MASSFLX=82, T_SETUP_RESTART=83,
+     & T_SETUP_TSTEP=84, T_SETUP_MULGRD=85, T_SETUP_XLENGTH=86,
+     & T_SETUP_LOSS=87, T_SETUP_TFLOW=88)
+C
 C      SET VARIOUS CONSTANTS AND INTEGERS NEEDED THROUGHOUT THE CALCULATION
 C
       WRITE(6,1111)
  1111 FORMAT('  ENTERING SUBROUTINE SETUP SO DATA INPUT WAS OK ')
       WRITE(6,*)
       WRITE(6,*) ' ANS_IN = ', ANS_IN
+C
+      CALL TIMER_START(T_SETUP_CONST)
 C
       JLEP1  = JLE(1)+1
       NRWSM1 = NROWS-1
@@ -8126,6 +8139,9 @@ C
 C********************************************************************************
 C********************************************************************************
 C
+      CALL TIMER_STOP(T_SETUP_CONST)
+      CALL TIMER_START(T_SETUP_INTPOL)
+C
 C      CALL INTPOL TO INTERPOLATE IN INPUT DATA TO SET UP GRID NODES ON THE
 C      BLADE SURFACES.
 C      IF KM = 2 THEN THE TWO INPUT STREAM SURFACES ARE THE HUB AND CASING
@@ -8156,6 +8172,9 @@ C
  1888 FORMAT( '  INTERPOLATION IN INPUT BLADE SECTIONS COMPLETED OK ')
 C
       ENDIF
+C
+      CALL TIMER_STOP(T_SETUP_INTPOL)
+      CALL TIMER_START(T_SETUP_GRID)
 C
 C******************************************************************************
 C******************************************************************************
@@ -8297,6 +8316,9 @@ C******************************************************************************
 C******************************************************************************
 C           WORK OUT THE PROJECTED AREAS OF THE BLADE FACES
 C
+      CALL TIMER_STOP(T_SETUP_GRID)
+      CALL TIMER_START(T_SETUP_AREAS)
+C
       WRITE(6,*) ' STARTING TO WORK OUT AREAS OF FACES OF ELEMENTS'
 C
 C           QUASI ORTHOGONAL FACE FIRST.
@@ -8424,6 +8446,9 @@ C      END IF
 C
       WRITE(6,*)  ' AREAS OF ALL FACES OF THE ELEMENTS EVALUATED '
 C
+      CALL TIMER_STOP(T_SETUP_AREAS)
+      CALL TIMER_START(T_SETUP_INITPRO)
+C
 C**********************************************************************************
 C**********************************************************************************
 C
@@ -8529,6 +8554,9 @@ C*******************************************************************************
 C**********************************************************************************
 C
       WRITE(6,*) ' INITAL GUESS OF P & RO COMPLETED '
+C
+      CALL TIMER_STOP(T_SETUP_INITPRO)
+      CALL TIMER_START(T_SETUP_INITVEL)
 C
 C**********************************************************************************
 C   SET THE INITIAL GUESS OF VELOCITY COMPONENTS.  MAKE THE TANGENTIAL VELOCITY
@@ -8669,6 +8697,9 @@ C  END TFLOW
 C*********************************************************************************
 C     SET THE MASS FLUXES, ROVX, ROVR, RORVT  AND ROE '
 C
+      CALL TIMER_STOP(T_SETUP_INITVEL)
+      CALL TIMER_START(T_SETUP_MASSFLX)
+C
       PREFF = 0.5*(P(IMID,1,KMID) + P(IMID,JM,KMID))
 C
       DO 3500 J=1,JM
@@ -8720,6 +8751,9 @@ C
 C**********************************************************************************
 C**********************************************************************************
 C      READ IN FROM RESTART FILE IF "IF_RESTART" = 1 TO OVERWRITE INITIAL GUESS
+C
+      CALL TIMER_STOP(T_SETUP_MASSFLX)
+      CALL TIMER_START(T_SETUP_RESTART)
 C
       IF(IF_RESTART.EQ.0) GO TO 3700
 C
@@ -8826,6 +8860,9 @@ C******************************************************************************
 C   END OF SETTING UP THE FLOW FROM THE RESTART FILE.
  3700 CONTINUE
 C
+      CALL TIMER_STOP(T_SETUP_RESTART)
+      CALL TIMER_START(T_SETUP_TSTEP)
+C
 C******************************************************************************
 C******************************************************************************
 C        SET THE VALUE OF STEP(I,J,K)= TIMESTEP/VOLUME FOR EACH ELEMENT.
@@ -8895,6 +8932,9 @@ C
 C
 C*******************************************************************************
 C*******************************************************************************
+C
+      CALL TIMER_STOP(T_SETUP_TSTEP)
+      CALL TIMER_START(T_SETUP_MULGRD)
 C
       WRITE(6,*)  ' SETTING UP THE MULTIGRID ARRAYS '
 C
@@ -9189,6 +9229,9 @@ C******************************************************************************
 C
 C CALL SET_XLENGTH TO CALCULATE THE WALL DISTANCES AND SET THE MIXING LENGTHS
 C
+      CALL TIMER_STOP(T_SETUP_MULGRD)
+      CALL TIMER_START(T_SETUP_XLENGTH)
+C
       WRITE(6,*)    ' CALLING  SET_XLENGTH TO SET THE WALL DISTANCES AND 
      & MIXING LENGTHS'
 C
@@ -9199,6 +9242,9 @@ C
 C******************************************************************************
 C******************************************************************************
 C      CALL LOSS ROUTINES TO INITIALISE THE BODY FORCE TERMS
+C
+      CALL TIMER_STOP(T_SETUP_XLENGTH)
+      CALL TIMER_START(T_SETUP_LOSS)
 C
       WRITE(6,*)  ' CALLING THE LOSS ROUTINES FROM SETUP, ILOS = ',ILOS
 C
@@ -9219,6 +9265,9 @@ C  INITIALISE THE SHROUD FLOWS, BLEED FLOWS AND COOLING FLOWS TO ZERO.
       SUMBLEED(J) = 0.0
       SUMCWL(J)   = 0.0
  9030 CONTINUE
+C
+      CALL TIMER_STOP(T_SETUP_LOSS)
+      CALL TIMER_START(T_SETUP_TFLOW)
 C
 C******************************************************************************
 C TFLOW
@@ -9331,6 +9380,8 @@ C************IF NOUT(1)=0 WRITE OUT AND PLOT OUT THE INITIAL GUESS OF THE FLOW F
            CALL OUTPUT
       END IF
 C
+C
+      CALL TIMER_STOP(T_SETUP_TFLOW)
 C
       WRITE(6,*)
       WRITE(6,*)'******************************************************'
@@ -14530,6 +14581,9 @@ C*******************************************************************************
 C********************************************************************************
       INCLUDE 'commall-open-21.3'
 C
+C     Pre-computed endwall distance for each (J,K) pair
+      REAL ENDWALL_PRE(JD,KD)
+C
 C   THE NEAREST WALL IS SOUGHT OVER THE RANGE  J  +/- JRANGE,  K  +/- KRANGE
 C
       WRITE(6,*) ' STARTING SET_XLENGTH. '
@@ -14540,6 +14594,93 @@ C     WALL POINT IS SOUGHT
       KRANGE = 5
 C
 C
+C*******************************************************************************
+C     Phase 1: Pre-compute endwall (hub/casing) distances for each (J,K).
+C     These do not depend on I, so computing here avoids IM redundant
+C     searches in the main loop.
+C*******************************************************************************
+C$OMP PARALLEL DO DEFAULT(NONE)
+C$OMP&PRIVATE(K, J, J1, J2, JWALL, DMIN, DISTSQ, JMIN,
+C$OMP&  XDIF, RDIF, ATOT, XNORM, RNORM,
+C$OMP&  HUBDIST, TIPDIST, DIST_REF, PITCH)
+C$OMP&SHARED(KM, JM, IMID, JRANGE, IBOUND,
+C$OMP&  X, R, NBLADE, ASX, ASR, ENDWALL_PRE)
+C$OMP&SCHEDULE(STATIC)
+      DO 500 K=1,KM
+      DO 500 J=1,JM
+      PITCH    = 6.283185*R(J,K)/NBLADE(J)
+      DIST_REF = 0.5*PITCH
+C
+      J1 = J - JRANGE
+      IF(J1.LT.2)  J1 = 2
+      J2 = J + JRANGE
+      IF(J2.GT.JM) J2 = JM
+C
+      DMIN = 1.0E10
+C   FIND THE NEAREST POINT ON THE HUB
+      DO 510 JWALL = J1,J2
+      XDIF  = X(J,K) - X(JWALL,1)
+      RDIF  = R(J,K) - R(JWALL,1)
+      DISTSQ = XDIF*XDIF + RDIF*RDIF
+      IF(DISTSQ.LT.DMIN) THEN
+           DMIN = DISTSQ
+           JMIN = JWALL
+      END IF
+  510 CONTINUE
+C    FIND THE PERPENDICULAR DISTANCE TO THE NEAREST POINT ON THE HUB
+      ATOT  = SQRT(ASX(IMID,JMIN,1)*ASX(IMID,JMIN,1)
+     &      + ASR(IMID,JMIN,1)*ASR(IMID,JMIN,1))
+      XNORM = ASX(IMID,JMIN,1)/ATOT
+      RNORM = ASR(IMID,JMIN,1)/ATOT
+      XDIF  = X(J,K) - X(JMIN,1)
+      RDIF  = R(J,K) - R(JMIN,1)
+      HUBDIST = ABS(XDIF*XNORM + RDIF*RNORM)
+      IF(IBOUND.EQ.1.OR.IBOUND.GT.2) HUBDIST = DIST_REF
+C
+C   FIND THE NEAREST POINT ON THE CASING
+      DMIN = 1.0E10
+      DO 520 JWALL = J1,J2
+      XDIF  = X(J,K) - X(JWALL,KM)
+      RDIF  = R(J,K) - R(JWALL,KM)
+      DISTSQ = XDIF*XDIF + RDIF*RDIF
+      IF(DISTSQ.LT.DMIN) THEN
+           DMIN = DISTSQ
+           JMIN = JWALL
+      END IF
+  520 CONTINUE
+C    FIND THE PERPENDICULAR DISTANCE TO THE NEAREST POINT ON THE CASING
+      ATOT  = SQRT(ASX(IMID,JMIN,KM)*ASX(IMID,JMIN,KM)
+     &      + ASR(IMID,JMIN,KM)*ASR(IMID,JMIN,KM))
+      XNORM = ASX(IMID,JMIN,KM)/ATOT
+      RNORM = ASR(IMID,JMIN,KM)/ATOT
+      XDIF  = X(J,K) - X(JMIN,KM)
+      RDIF  = R(J,K) - R(JMIN,KM)
+      TIPDIST = ABS(XDIF*XNORM + RDIF*RNORM)
+      IF(IBOUND.GE.2) TIPDIST = DIST_REF
+C
+      ENDWALL_PRE(J,K) = HUBDIST*TIPDIST/(HUBDIST + TIPDIST)
+  500 CONTINUE
+C$OMP END PARALLEL DO
+C
+C*******************************************************************************
+C     Phase 2: Main loop — blade surface search + combine with pre-computed
+C     endwall distance. Parallelized over K.
+C*******************************************************************************
+C$OMP PARALLEL DO DEFAULT(NONE)
+C$OMP&PRIVATE(K, J, I, NR, PITCH, DIST_REF,
+C$OMP&  J1, J2, K1, K2, JSURF, KSURF,
+C$OMP&  DMIN, DISTSQ, JMIN, KMIN,
+C$OMP&  XDIF, RDIF, TDIF, TDIFSQ,
+C$OMP&  ATOT, XNORM, RNORM, TNORM, KNORM,
+C$OMP&  ENDWALL_DIST, IF_FOUND,
+C$OMP&  SSDIST, PSDIST, BLADE_DIST, DISTSQRT, XLLIM)
+C$OMP&SHARED(KM, JM, IM, IMID, KMID, JRANGE, KRANGE,
+C$OMP&  X, R, THETA, NROW, NBLADE,
+C$OMP&  ABX, ABR, ABT,
+C$OMP&  JLE, JTE, JSTART, JMIX, SMERID,
+C$OMP&  XLLIM_IN, XLLIM_LE, XLLIM_TE, XLLIM_DN,
+C$OMP&  DIST_MIN, XLIMIT, ENDWALL_PRE)
+C$OMP&SCHEDULE(STATIC)
       DO 1000 K=1,KM
       DO 1000 J=1,JM
       NR       = NROW(J)
@@ -14549,65 +14690,9 @@ C
 C********************************************************************************
 C********************************************************************************
       DO 1000 I=1,IM
-
-C     FIND THE DISTANCE TO THE HUB OR CASING
 C
-      IWALL = IMID
-      J1 = J - JRANGE
-      IF(J1.LT.2)  J1 = 2
-      J2 = J + JRANGE
-      IF(J2.GT.JM) J2 = JM
-C
-      HUBDIST = 1.0E10
-      TIPDIST = 1.0E10
-      DMIN    = 1.0E10
-C
-C   FIND THE NEAREST POINT ON THE HUB
-      DO 10 JWALL = J1,J2
-      XDIF  = X(J,K) - X(JWALL,1)
-      RDIF  = R(J,K) - R(JWALL,1)
-      DISTSQ = XDIF*XDIF + RDIF*RDIF
-      IF(DISTSQ.LT.DMIN) THEN
-           DMIN = DISTSQ
-           JMIN = JWALL
-      END IF
-   10 CONTINUE
-C
-C    FIND THE PERPENDICULAR DISTANCE TO THE NEAREST POINT ON THE HUB
-      ATOT  = SQRT(ASX(IWALL,JMIN,1)*ASX(IWALL,JMIN,1)
-     &      + ASR(IWALL,JMIN,1)*ASR(IWALL,JMIN,1))
-      XNORM = ASX(IWALL,JMIN,1)/ATOT
-      RNORM = ASR(IWALL,JMIN,1)/ATOT
-      XDIF  = X(J,K) - X(JMIN,1)
-      RDIF  = R(J,K) - R(JMIN,1)
-      HUBDIST = ABS(XDIF*XNORM + RDIF*RNORM)
-      IF(IBOUND.EQ.1.OR.IBOUND.GT.2) HUBDIST = DIST_REF
-C
-C   FIND THE NEAREST POINT ON THE CASING
-      DMIN    = 1.0E10
-      DO 15 JWALL = J1,J2
-      XDIF  = X(J,K) - X(JWALL,KM)
-      RDIF  = R(J,K) - R(JWALL,KM)
-      DISTSQ = XDIF*XDIF + RDIF*RDIF
-      IF(DISTSQ.LT.DMIN) THEN
-           DMIN = DISTSQ
-           JMIN = JWALL
-      END IF
-   15 CONTINUE
-C
-C    FIND THE PERPENDICULAR DISTANCE TO THE NEAREST POINT ON THE CASING
-      ATOT  = SQRT(ASX(IWALL,JMIN,KM)*ASX(IWALL,JMIN,KM)
-     &      + ASR(IWALL,JMIN,KM)*ASR(IWALL,JMIN,KM))
-      XNORM = ASX(IWALL,JMIN,KM)/ATOT
-      RNORM = ASR(IWALL,JMIN,KM)/ATOT
-      XDIF  = X(J,K) - X(JMIN,KM)
-      RDIF  = R(J,K) - R(JMIN,KM)
-      TIPDIST = ABS(XDIF*XNORM + RDIF*RNORM)
-      IF(IBOUND.GE.2) TIPDIST = DIST_REF
-C
-C   STORE THE DISTANCE TO THE NEAREST END WALL
-C
-       ENDWALL_DIST = HUBDIST*TIPDIST/(HUBDIST + TIPDIST)
+C     Use pre-computed endwall distance (hub/casing)
+      ENDWALL_DIST = ENDWALL_PRE(J,K)
 C
 C*************************************************************************
 C*************************************************************************
@@ -14772,6 +14857,7 @@ C
       END IF 
 C   END OF LOOP OVER ALL  I,J, K,  POINTS .
  1000 CONTINUE
+C$OMP END PARALLEL DO
 C
 C*******************************************************************************  
 C*******************************************************************************  
@@ -20136,7 +20222,7 @@ C******************************************************************************
 
        SUBROUTINE TIMER_INIT
       INTEGER NT
-      PARAMETER (NT=75)
+      PARAMETER (NT=88)
        DOUBLE PRECISION TSTART, TACCUM
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
        INTEGER I
@@ -20153,7 +20239,7 @@ C******************************************************************************
        SUBROUTINE TIMER_START(ID)
        INTEGER ID
       INTEGER NT
-      PARAMETER (NT=75)
+      PARAMETER (NT=88)
        DOUBLE PRECISION TSTART, TACCUM, NOW
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -20167,7 +20253,7 @@ C******************************************************************************
        SUBROUTINE TIMER_STOP(ID)
        INTEGER ID
       INTEGER NT
-      PARAMETER (NT=75)
+      PARAMETER (NT=88)
        DOUBLE PRECISION TSTART, TACCUM, NOW
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -20181,7 +20267,7 @@ C******************************************************************************
             SUBROUTINE TIMER_ACCUM(ID, DT)
             INTEGER ID
             INTEGER NT
-            PARAMETER (NT=75)
+            PARAMETER (NT=88)
             DOUBLE PRECISION TSTART, TACCUM, DT
             COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
 
@@ -20193,7 +20279,7 @@ C******************************************************************************
 
        SUBROUTINE TIMER_REPORT
       INTEGER NT
-      PARAMETER (NT=75)
+      PARAMETER (NT=88)
        DOUBLE PRECISION TSTART, TACCUM
        COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
       CHARACTER*40 NAME(NT)
@@ -20274,6 +20360,19 @@ C******************************************************************************
                   DATA NAME(73) /'5STP: OUTPUT/LOSS'/
                   DATA NAME(74) /'5STP: EFICOOL'/
                   DATA NAME(75) /'5STP: SUMMARY I/O'/
+                  DATA NAME(76) /'SETUP: CONST/INIT'/
+                  DATA NAME(77) /'SETUP: INTPOL'/
+                  DATA NAME(78) /'SETUP: GRID COORD'/
+                  DATA NAME(79) /'SETUP: AREAS'/
+                  DATA NAME(80) /'SETUP: INIT P/RO/T'/
+                  DATA NAME(81) /'SETUP: INIT VELOCITY'/
+                  DATA NAME(82) /'SETUP: MASS/FLUX INIT'/
+                  DATA NAME(83) /'SETUP: RESTART FILE'/
+                  DATA NAME(84) /'SETUP: TIMESTEP'/
+                  DATA NAME(85) /'SETUP: MULTIGRID'/
+                  DATA NAME(86) /'SETUP: SET_XLENGTH'/
+                  DATA NAME(87) /'SETUP: LOSS ROUTINES'/
+                  DATA NAME(88) /'SETUP: TFLOW'/
 
        WRITE(4,*)
        WRITE(4,*) '================ WALL TIME SUMMARY (s) ================'
