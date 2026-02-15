@@ -572,3 +572,223 @@ OMP=1 で約1秒の削減はアルゴリズム最適化による純粋な計算�
 - SETUP: INIT VELOCITY (1.25s) の並列化検討
 - SET_XLENGTH の Plan C（翼面探索の事前計算）は効果が限定的のため保留
 - HP Steam Turbine テストケースの追加（別メッシュでの検証）
+
+---
+
+## HP Steam Turbine ベンチマーク（AWS, FINAL AVG 修正前）
+
+### テストケース仕様
+- 入力: `hp-steam-turb.dat`（高圧蒸気タービン）
+- メッシュ: IM=37, KM=37, 5 翼列, 4 混合面 (JMIX=111,217,323,434)
+- NSTEPS_MAX=9000, CONLIM=0.0005
+- 実ステップ: 約 5686 ステップで収束
+
+### 実行結果（AWS c7i 8C/16T, timestamp 20260215_1255）
+
+#### LOOP: TOTAL
+
+| | Original | OMP=1 | OMP=2 | OMP=4 | OMP=8 |
+|---|---:|---:|---:|---:|---:|
+| LOOP: TOTAL (s) | 680.8 | 669.2 | 355.0 | 202.7 | 137.4 |
+| 対 OMP=1 倍率 | — | 1.00x | 1.89x | 3.30x | **4.87x** |
+
+#### 数値検証
+- 全ラン正常収束（NaN なし）
+- Original vs OMP=1: PR, eta_TT, eta_TS, Power, Flow 全項目 Rel.Diff < 0.003% — **合格**
+- 収束指標: EAVG ~0.50E-03, FLOW ~318 で一致
+
+#### セクション別スケーリング (OMP=1 → OMP=8)
+
+| セクション | OMP=1 (s) | OMP=8 (s) | 倍率 |
+|---|---:|---:|---:|
+| DELTA/STORE | 55.1 | 7.1 | 7.77x |
+| VISCOUS/TURB | 45.3 | 5.8 | 7.82x |
+| PRESSURE/TEMP | 47.4 | 6.4 | 7.41x |
+| MOM FLUX BUILD | 93.1 | 14.1 | 6.62x |
+| CELL->NODE | 38.3 | 5.8 | 6.56x |
+| SMOOTH_VAR | 111.8 | 23.0 | 4.86x |
+| **FINAL AVG** | **2.1** | **11.3** | **0.19x (逆スケーリング)** |
+| MG AGG | 53.4 | 20.9 | 2.56x |
+
+### FINAL AVG 逆スケーリングの原因分析
+
+**問題**: FINAL AVG が OMP=1: 2.1s → OMP=8: 11.3s（**5.4x 悪化**）
+
+**原因**: FINAL AVG コードが `C$OMP END PARALLEL` の**後**（シリアル区間）に配置されていた。
+- 並列計算で 8 コアの L1/L2 キャッシュに分散保持されたデータを、FINAL AVG でコア 0 がシリアルにアクセス
+- リモートキャッシュアクセスのレイテンシにより、スレッド数増加で悪化
+- HP Steam は 4 混合面の pitchwise 平均化（全 I 走査）が特に重く、two-stg（2混合面）より影響大
+
+---
+
+## FINAL AVG 修正: PARALLEL 領域内への移動 + 並列化
+
+### 変更内容
+
+TSTEP サブルーチン内の FINAL AVG セクション（周期境界条件 + チップギャップ + 混合面平均化）を `C$OMP END PARALLEL` の前に移動し、並列化。
+
+#### 1. PARALLEL 領域内への移動
+- SMOOTH_VAR の END IF の直後、`C$OMP END PARALLEL` の前に配置
+- `C$OMP BARRIER` + `C$OMP MASTER` で TIMER_START/STOP を保護
+
+#### 2. 周期境界条件ループ (J ループ) の並列化
+```fortran
+C$OMP DO SCHEDULE(STATIC)
+      DO J=1,JM
+      IF((IND(J).EQ.1).OR.(INDLE(J).EQ.1)) GO TO 8000
+      DO K=1,KM
+      D(1,J,K)      = 0.5*(D(1,J,K)+D(ILAST,J,K))
+      D(ILAST,J,K) = D(1,J,K)
+      ENDDO
+ 8000 CONTINUE
+      ENDDO
+C$OMP END DO
+```
+
+#### 3. チップギャップ周期性ループ (J ループ) の並列化
+```fortran
+C$OMP DO SCHEDULE(STATIC)
+      DO J=1,JM
+      ...
+      ENDDO
+C$OMP END DO
+```
+
+#### 4. 混合面 pitchwise 平均化ループ (K ループ) の並列化
+```fortran
+C$OMP DO SCHEDULE(STATIC) PRIVATE(AVGVARJ,AVGVARJP1)
+      DO K=1,KM
+      ...
+      ENDDO
+C$OMP END DO
+```
+
+#### 5. 変数分類の更新
+- PRIVATE に追加: `ILAST, AVGVARJ, AVGVARJP1`
+- SHARED に追加: `IND, INDLE, IFMIX`
+
+#### 6. DO ラベルの構造化
+- 旧ラベル (7000/8000/510/511/201/301/401) → ENDDO に変換
+
+### ローカル検証 (two-stg, OMP=1)
+- EMAX=2.7797 — 変更前と一致
+- FINAL AVG: 0.236s（変更前 ~1s からさらに削減）
+
+### 変更ファイル
+- `dev/src/multall-open21.3-s1.0.f`: TSTEP サブルーチン (lines 7488-7575)
+
+---
+
+## AWS HP Steam ベンチマーク（FINAL AVG 修正後, timestamp 1421）
+
+### 実行条件
+- AWS EC2 c7i (IP: 15.134.184.40), gfortran -fopenmp
+- FINAL AVG 修正版のソースを転送・リビルド済み
+- HP Steam (~5676 ステップで収束)
+
+### 数値検証
+
+#### 収束指標（最終ステップ）
+
+| | Original (5686) | OMP=1 (5676) | OMP=2 | OMP=4 | OMP=8 |
+|---|---|---|---|---|---|
+| EAVG | 0.50261E-03 | 0.50260E-03 | 0.50338E-03 | 0.50412E-03 | 0.50412E-03 |
+| ECONT | 0.35778E-02 | 0.35883E-02 | 0.35878E-02 | 0.35779E-02 | 0.35870E-02 |
+| FLOW | 318.14 | 318.14 | 318.14 | 318.14 | 318.15 |
+
+last-digit 差のみ — **合格**。
+
+#### 全体性能（Original vs OMP=1）
+
+| 指標 | Original | OMP=1 | Rel.Diff |
+|---|---|---|---|
+| PR | 1.32120907 | 1.32120669 | -0.000180% |
+| eta_TT | 0.892612696 | 0.892601967 | -0.001202% |
+| eta_TS | 0.865448833 | 0.865437806 | -0.001274% |
+| Power (kW) | 25550.3809 | 25549.7246 | -0.002569% |
+| Flow In | 317.929932 | 317.931793 | +0.000585% |
+| Flow Out | 317.770020 | 317.769623 | -0.000125% |
+
+全項目 Rel.Diff < 0.003% — **合格**。OMP=8 vs Original も全項目 < 0.002%。
+
+### LOOP: TOTAL スケーリング
+
+| | Original | OMP=1 | OMP=2 | OMP=4 | OMP=8 |
+|---|---:|---:|---:|---:|---:|
+| LOOP: TOTAL (s) | 685.7 | 645.8 | 329.6 | 185.7 | **123.3** |
+| 対 OMP=1 倍率 | — | 1.00x | 1.96x | 3.48x | **5.24x** |
+| 対 Original 倍率 | — | 1.06x | 2.08x | 3.69x | **5.56x** |
+
+### FINAL AVG 修正効果（1255→1421 比較）
+
+| | 修正前 (1255) | 修正後 (1421) | 改善 |
+|---|---:|---:|---:|
+| FINAL AVG @OMP=1 | 2.14s | 2.22s | 横ばい |
+| FINAL AVG @OMP=8 | **11.30s** | **2.87s** | **-8.43s (74.6% 削減)** |
+| LOOP: TOTAL @OMP=8 | 137.4s | **123.3s** | **-14.1s (10.3%)** |
+| OMP=1→8 倍率 | 4.87x | **5.24x** | +7.6% |
+
+逆スケーリング (0.19x) → **ほぼ横ばい (0.78x)** に解消。
+
+### OMP=8 セクション別比較 (1255→1421)
+
+| セクション | 1255 (s) | 1421 (s) | 差 (s) | 改善率 |
+|---|---:|---:|---:|---:|
+| **FINAL AVG** | **11.30** | **2.87** | **-8.43** | **74.6%** |
+| SMOOTH_VAR | 23.01 | 20.16 | -2.85 | 12.4% |
+| DENSITY | 15.49 | 12.86 | -2.63 | 17.0% |
+| ENERGY | 15.39 | 12.88 | -2.51 | 16.3% |
+| MOMENTUM-R | 14.96 | 12.56 | -2.40 | 16.0% |
+| MOMENTUM-T | 14.92 | 12.56 | -2.36 | 15.8% |
+| MOMENTUM-X | 14.78 | 12.74 | -2.04 | 13.8% |
+| MOM FLUX BUILD | 16.38 | 15.49 | -0.89 | 5.4% |
+| STEP/DAMP | 13.96 | 13.24 | -0.73 | 5.2% |
+| MG AGG | 9.64 | 9.04 | -0.61 | 6.3% |
+
+FINAL AVG の -8.43s が主因。加えて TSTEP 各セクションで各 2-2.5s 改善（FINAL AVG が PARALLEL 内に移動したことでキャッシュ汚染が解消）。
+
+### OMP=8 ボトルネック（修正後）
+
+| 順位 | セクション | OMP=8 (s) | 占有率 | 倍率 |
+|---:|---|---:|---:|---:|
+| 1 | SMOOTH_VAR | 20.16 | 16.3% | 5.58x |
+| 2 | MOM FLUX BUILD | 15.49 | 12.6% | 6.76x |
+| 3 | STEP/DAMP | 13.24 | 10.7% | 4.29x |
+| 4 | DENSITY | 12.86 | 10.4% | 4.67x |
+| 5 | ENERGY | 12.88 | 10.4% | 4.92x |
+| 6 | MOMENTUM-X | 12.74 | 10.3% | 4.76x |
+| 7 | MOMENTUM-T | 12.56 | 10.2% | 4.87x |
+| 8 | MOMENTUM-R | 12.56 | 10.2% | 4.89x |
+| 9 | MG AGG | 9.04 | 7.3% | 2.75x |
+| 10 | CELL->NODE | 9.05 | 7.3% | 6.42x |
+
+### 現在の速度向上状況
+
+#### ローカル (i5-12400F 6C/12T, 100ステップ)
+| | original | OMP=1 | OMP=2 | OMP=4 |
+|---|---|---|---|---|
+| LOOP: TOTAL | 54.42s | 52.94s | 37.33s | 31.32s |
+| 対 original | — | 1.03x | 1.46x | 1.74x |
+
+#### AWS (c7i 8C/16T, two-stg 100ステップ) — 02-15 計測 (1149)
+| | original | OMP=1 | OMP=2 | OMP=4 | OMP=8 |
+|---|---|---|---|---|---|
+| LOOP: TOTAL | 81.11s | 76.01s | 39.90s | 22.11s | 13.33s |
+| 対 original | — | 1.07x | 2.03x | 3.67x | **6.09x** |
+
+#### AWS (c7i 8C/16T, two-stg 10000→6976ステップ収束)
+| | Timer | OMP=1 | OMP=4 | OMP=8 |
+|---|---|---|---|---|
+| LOOP: TOTAL | 5159s | 4981s | 1421s | 839s |
+| 対 OMP=1 | — | — | 3.50x | **5.94x** |
+
+#### AWS (c7i 8C/16T, HP Steam ~5676ステップ収束) — FINAL AVG 修正後
+| | Original | OMP=1 | OMP=2 | OMP=4 | OMP=8 |
+|---|---|---|---|---|---|
+| LOOP: TOTAL | 685.7s | 645.8s | 329.6s | 185.7s | 123.3s |
+| 対 Original | — | 1.06x | 2.08x | 3.69x | **5.56x** |
+
+### 次のアクション
+- two-stg での FINAL AVG 修正検証（AWS 1000stp）
+- HP Steam の TSTEP スケーリング（4.3-4.9x）が two-stg (6.0x) より低い原因分析（KM=37 の並列粒度不足？）
+- MG AGG (2.75x) の改善検討

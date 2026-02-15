@@ -6895,7 +6895,8 @@ C$OMP&GSUM,FCDN,FCUP_J,
 C$OMP&SUM_B1,SUM_B2,SUM_SB,
 C$OMP&ISTART,IEND,KSTART,KEND,
 C$OMP&I1ST,I1EN,K1ST,K1EN,
-C$OMP&AVFLXJM1,AVFLXJP2,DFLUXJM1,DFLUXJP2,DFLUX)
+C$OMP&AVFLXJM1,AVFLXJP2,DFLUXJM1,DFLUXJP2,DFLUX,
+C$OMP&ILAST,AVGVARJ,AVGVARJP1)
 C$OMP&SHARED(STORE,STEP,RSTEP,B1CHG,B2CHG,SBCHG,
 C$OMP&STEP1,STEP2,STEPSBK,
 C$OMP&KB1,KB2,JB1,JB2,IB1,IB2,JSBLK,IMM1,JM,KMM1,
@@ -6906,7 +6907,7 @@ C$OMP&D,NCALL,AVG,TURBVIS_DAMP,FP,SFT,FAC_SFVIS,
 C$OMP&NRWSM1,FLOWX,IMID,FEXTRAP,
 C$OMP&FACDWN,FACUP,FBL,FBR,FTL,FTR,IM,KM,
 C$OMP&XFLUX,TFLUX,RFLUX,SOURCE,DIFF,NBLADE,F1,F2,F3,
-C$OMP&KTIPS,KTIPE,
+C$OMP&KTIPS,KTIPE,IND,INDLE,IFMIX,
 C$OMP&IR,JR,KR,IRBB,KRBB,
 C$OMP&NIB1,NIB2,NKB1,NKB2,NJB1,NJB2,NSBLK,
 C$OMP&JSTB1,JENB1,JSTB2,JENB2,JSTSB,JENSB,
@@ -7484,59 +7485,54 @@ C$OMP END MASTER
 C
       END IF
 C
-C---- End of unified PARALLEL region ----
-C$OMP END PARALLEL
+C---- FINAL AVG: periodic BC + tip gap + mixing plane (inside PARALLEL) ----
 C
-C*******************************************************************************
-C*******************************************************************************
- 8700 CONTINUE
-C*******************************************************************************
-C*******************************************************************************
-C**********APPLY THE PERIODIC BOUNDARY CONDITIONS AT I=1 AND IM ***************
-C  
+C$OMP BARRIER
+C$OMP MASTER
       CALL TIMER_START(T_TSTEP_FINAL)
+C$OMP END MASTER
+C$OMP BARRIER
+C
       ILAST = IM
       IF(NCALL.EQ.2) ILAST = IMM1
 C
-      DO 8000 J=1,JM
+C     Periodic boundary conditions at I=1 and IM
+C     J loop — each J is independent, parallelize over J
+C$OMP DO SCHEDULE(STATIC)
+      DO J=1,JM
       IF((IND(J).EQ.1).OR.(INDLE(J).EQ.1)) GO TO 8000
-      DO 7000 K=1,KM
+      DO K=1,KM
       D(1,J,K)      = 0.5*(D(1,J,K)+D(ILAST,J,K))
       D(ILAST,J,K) = D(1,J,K)
- 7000 CONTINUE
+      ENDDO
  8000 CONTINUE
+      ENDDO
+C$OMP END DO
 C
-C*******************************************************************************
-C*******************************************************************************
 C  Q3D
       IF(KM.EQ.2) GO TO 509
-C  END Q3D
-C*******************************************************************************
-C*******************************************************************************
 C
-C     APPLY PERIODICITY ACROSS THE TIP GAP.
-C     NOTE THAT THE TIP POINT ITSELF,  KTIP,  IS NOT PERIODIC.
-C
-      DO 510 J=1,JM
+C     Apply periodicity across the tip gap.
+C     Note that the tip point itself, KTIP, is not periodic.
+C$OMP DO SCHEDULE(STATIC)
+      DO J=1,JM
       NR = NROW(J)
       IF(KTIPS(NR).LE.0) GO TO 510
       K1 = KTIPS(NR)
       K2 = KTIPE(NR)
       IF(K1.EQ.1)  K2 = K2-1
       IF(K2.EQ.KM) K1 = K1+1
-      DO 511 K=K1,K2
+      DO K=K1,K2
       D(1,J,K)     = 0.5*(D(1,J,K)+D(ILAST,J,K))
       D(ILAST,J,K) = D(1,J,K)
-  511 CONTINUE
+      ENDDO
   510 CONTINUE
+      ENDDO
+C$OMP END DO
 C
-C*******************************************************************************
-C*******************************************************************************
   509 CONTINUE
-C*******************************************************************************
-C*******************************************************************************
 C
-C    PITCHWISE AVERAGE THE VARIABLES ON BOTH FACES OF THE MIXING PLANE
+C    Pitchwise average on both faces of the mixing plane
 C
       IF(IFMIX.EQ.0) GO TO 1400
 C
@@ -7544,28 +7540,39 @@ C
       J   = JMIX(NR)
       JP1 = J+1
 C
-      DO 201 K=1,KM
+C     K loop is independent — parallelize over K
+C$OMP DO SCHEDULE(STATIC) PRIVATE(AVGVARJ,AVGVARJP1)
+      DO K=1,KM
       AVGVARJ    = 0.0
       AVGVARJP1  = 0.0
-      DO 301 I=1,IMM1
-      AVGVARJ   = AVGVARJ   + FP(I)*(D(I,J,K)+D(I+1,J,K)) 
-      AVGVARJP1 = AVGVARJP1 + FP(I)*(D(I,JP1,K)+D(I+1,JP1,K))  
-  301 CONTINUE
+      DO I=1,IMM1
+      AVGVARJ   = AVGVARJ   + FP(I)*(D(I,J,K)+D(I+1,J,K))
+      AVGVARJP1 = AVGVARJP1 + FP(I)*(D(I,JP1,K)+D(I+1,JP1,K))
+      ENDDO
       AVGVARJ   = 0.5*AVGVARJ
       AVGVARJP1 = 0.5*AVGVARJP1
-      DO 401 I=1,IM
+      DO I=1,IM
       D(I,J,K)   = AVGVARJ
       D(I,JP1,K) = AVGVARJP1
-  401 CONTINUE 
-  201 CONTINUE
-C 
+      ENDDO
+      ENDDO
+C$OMP END DO
+C
   100 CONTINUE
 C
-C     END OF  MIXING PLANE TREATMENT
+C     End of mixing plane treatment
 C
  1400 CONTINUE
-
-                  CALL TIMER_STOP(T_TSTEP_FINAL)
+C
+C$OMP BARRIER
+C$OMP MASTER
+      CALL TIMER_STOP(T_TSTEP_FINAL)
+C$OMP END MASTER
+C
+C---- End of unified PARALLEL region ----
+C$OMP END PARALLEL
+C
+ 8700 CONTINUE
 C
 C*******************************************************************************
 C*******************************************************************************
@@ -17921,7 +17928,7 @@ C$OMP END MASTER
       DO 4006 NR = 1,NROWS
       JS = JLED(NR)-2
       JE = JS + 1
-C$OMP DO SCHEDULE(STATIC) COLLAPSE(2)
+C$OMP DO SCHEDULE(STATIC) COLLAPSE(2) 
       DO 4004 J = JS,JE
       DO 4004 K=1,KM
       STORE(1,J,K)  = SFXHM1*D(1,J,K) + SFX14*
@@ -17929,7 +17936,7 @@ C$OMP DO SCHEDULE(STATIC) COLLAPSE(2)
       STORE(IM,J,K) = SFXHM1*D(IM,J,K) + SFX14*
      &                         (D(2,J,K)+D(IMM1,J,K))
  4004 CONTINUE
-C$OMP END DO
+C$OMP END DO NOWAIT
       J = JLED(NR)
 C$OMP DO SCHEDULE(STATIC)
       DO 4007 K=1,KM
@@ -17938,8 +17945,11 @@ C$OMP DO SCHEDULE(STATIC)
       STORE(IM,J,K) = SFXHM1*D(IM,J,K)+SFX14*
      &                       (D(IM,J+1,K)+D(1,J,K))
  4007 CONTINUE
-C$OMP END DO
+C$OMP END DO NOWAIT
  4006 CONTINUE
+C     BARRIER before RESET: all STORE writes from LEADING must complete
+C     before RESET reads STORE to overwrite D.
+C$OMP BARRIER
 C$OMP MASTER
       CALL TIMER_STOP(T_SV_LEAD)
 C$OMP END MASTER
