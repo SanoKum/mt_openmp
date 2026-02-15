@@ -345,6 +345,83 @@ TSTEP（DENSITY/ENERGY/MOMENTUM 等）のコードは 02-11 → 02-14 で**一�
 
 ---
 
+## Periodic Boundary ループの並列化（MOM FLUX + ENERGY FLUX）
+
+### 対象
+- MOM FLUX BUILD (ID=40) 内の VX/VT/VR SINGLE セクション
+- ENERGY FLUX (ID=39) 内の periodic boundary ループ
+- 問題: periodic boundary ループが `C$OMP SINGLE` 内でシリアル実行 → OMP=8 で VX SINGLE=0.20s
+
+### 変更内容
+
+#### 1. MOM FLUX: VX periodic boundary (DO 6026/6027)
+- `C$OMP SINGLE` を分割: coolant ループは SINGLE のまま、periodic ループを `C$OMP DO SCHEDULE(STATIC)` に変更
+- `GOTO` → `IF(IND(J).NE.1) THEN` に構造化、K を外側ループに変更
+- SHROUDFLUX は別の `C$OMP SINGLE` で保護
+
+#### 2. MOM FLUX: VT periodic boundary (DO 902/903)
+- 同様に `C$OMP DO SCHEDULE(STATIC)` に変更
+- coolant/SHROUDFLUX は SINGLE のまま
+
+#### 3. MOM FLUX: VR periodic boundary (DO 6260/6261)
+- 同様に `C$OMP DO SCHEDULE(STATIC)` に変更
+- VR セクションに `T_MOMF_VR_DO` / `T_MOMF_VR_SGL` サブタイマーを追加
+
+#### 4. ENERGY FLUX: periodic boundary (DO 900/901)
+- PARALLEL 領域の外側（シリアル）にあったため、独立した `C$OMP PARALLEL DO` で並列化
+
+### 数値検証（ローカル OMP=1）
+- 全項目 0.000000% — **完全一致**
+
+### MOM FLUX ベクトル化分析
+
+| ループ | 方向 | packed | scalar | SIMD率 | 状態 |
+|---|---|---:|---:|---:|---|
+| DO 6100 | Axial XFLUX | 72 | 23 | 76% | OK |
+| DO 6110 | Axial RFLUX | 72 | 23 | 76% | OK |
+| DO 6120 | Axial TFLUX | 72 | 27 | 73% | OK |
+| DO 6200 | Tang. XFLUX | 40 | 15 | 73% | OK |
+| DO 6210 | Tang. TFLUX | 72 | 28 | 72% | OK |
+| DO 6230 | Tang. RFLUX | 40 | 19 | 68% | OK |
+| DO 6300 | Radial XFLUX | 72 | 23 | 76% | OK |
+| DO 6310 | Radial TFLUX | 72 | 27 | 73% | OK |
+| DO 6320 | Radial RFLUX | 72 | 23 | 76% | OK |
+| **DO 6330** | **Radial SOURCE** | **48** | **54** | **47%** | **要改善** |
+
+- 9/10 ループが AVX2 ymm (256bit) で良好にベクトル化
+- DO 6330 のみ SIMD 率 47%: 3変数×8点平均のレジスタ圧力が原因（"complicated access pattern"）
+
+### AWS ベンチマーク結果（02-15 vs 02-14, 100ステップ）
+
+#### LOOP: TOTAL
+
+| | Original | OMP=1 | OMP=2 | OMP=4 | OMP=8 |
+|---|---:|---:|---:|---:|---:|
+| 02-14 | 83.93s | 79.35s | 43.34s | 24.16s | 15.52s |
+| **02-15** | **80.11s** | **77.05s** | **40.82s** | **22.72s** | **13.83s** |
+| 差 | -3.82s | -2.30s | -2.52s | -1.44s | **-1.69s** |
+
+#### MOM FLUX BUILD (OMP=8)
+
+| | 02-14 | 02-15 | 改善 |
+|---|---:|---:|---:|
+| MOM FLUX BUILD | 2.32s | **1.81s** | **-0.51s (22%)** |
+| VX SINGLE | 0.20s | **0.05s** | **-0.15s (75%)** |
+| VT SINGLE | 0.06s | **0.02s** | **-0.04s (67%)** |
+| ENERGY FLUX | 0.50s | **0.41s** | **-0.09s (18%)** |
+
+#### 数値検証（Original vs OMP=1）
+全項目 Rel.Diff < 0.001% — **合格**
+
+#### スケーリング
+
+| | OMP=1→8 | Orig→8 |
+|---|---:|---:|
+| 02-14 | 5.11x | 5.40x |
+| **02-15** | **5.57x** | **5.79x** |
+
+---
+
 ### 現在の速度向上状況
 
 #### ローカル (i5-12400F 6C/12T, 100ステップ)
@@ -353,11 +430,11 @@ TSTEP（DENSITY/ENERGY/MOMENTUM 等）のコードは 02-11 → 02-14 で**一�
 | LOOP: TOTAL | 54.42s | 52.94s | 37.33s | 31.32s |
 | 対 original | — | 1.03x | 1.46x | 1.74x |
 
-#### AWS (c7i 8C/16T, 100ステップ) — 02-14 計測（2回平均）
+#### AWS (c7i 8C/16T, 100ステップ) — 02-15 計測
 | | original | OMP=1 | OMP=2 | OMP=4 | OMP=8 |
 |---|---|---|---|---|---|
-| LOOP: TOTAL | 84.2s | 81.2s | 43.9s | 24.5s | 15.7s |
-| 対 original | — | 1.04x | 1.92x | 3.44x | 5.36x |
+| LOOP: TOTAL | 80.11s | 77.05s | 40.82s | 22.72s | 13.83s |
+| 対 original | — | 1.04x | 1.96x | 3.53x | **5.79x** |
 
 #### AWS (c7i 8C/16T, 10000ステップ → 6976ステップ収束)
 | | Timer | OMP=1 | OMP=4 | OMP=8 |

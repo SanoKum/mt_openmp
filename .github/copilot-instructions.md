@@ -172,7 +172,13 @@ C$OMP END PARALLEL DO SIMD
   ```bash
   cp stage.log stage.log.$(date +%Y%m%d_%H%M)
   ```
-- **数値検証**: OMP=1 の EMAX/EAVG/ECONT/FLOW が変更前と一致すること（last-digit の浮動小数点差のみ許容）。不一致の場合はステップ 4 に戻る。
+- **数値検証**: 以下の2段階で確認する。不一致の場合はステップ 4 に戻る。
+  1. **収束指標**: OMP=1 の EMAX/EAVG/ECONT/FLOW が変更前と一致すること（last-digit の浮動小数点差のみ許容）。
+  2. **全体性能**: stdout ログから全体（WHOLE MACHINE）の圧力比(PR)・等エントロピー効率(eta_TT, eta_TS)・出力(Power)・流量(Flow In/Out) を抽出し、変更前と比較する。相対差 0.001% 未満であること。
+  - 比較には `dev/scripts/compare_performance.sh` を使用する：
+    ```bash
+    bash dev/scripts/compare_performance.sh run_before.out run_after.out
+    ```
 
 ### ステップ 6 — 区間別の計算時間比較
 
@@ -200,6 +206,7 @@ C$OMP END PARALLEL DO SIMD
 
 - 並列化対象のサブルーチンを変更する際は、変更前後で `stage.log` の数値差異を確認する。
 - 新しい OpenMP 領域を追加したら、`OMP_NUM_THREADS=1` での結果がシリアル版と一致することを必ず確認する。
+- 数値検証は **収束指標**（EMAX/EAVG/ECONT/FLOW）と **全体性能**（PR/eta_TT/eta_TS/Power/Flow）の両方で行う。全体性能の比較には `dev/scripts/compare_performance.sh` を使用する。
 - `GOTO` 文を含むループの並列化は避ける（構造化が先）。
 - I/O（`WRITE`, `READ`）を含むループの並列化は原則禁止。必要な場合は `CRITICAL` セクションで保護する。
 
@@ -324,7 +331,12 @@ grep "LOOP: TOTAL" dev/test_cases/stage.log.aws_*
 評価基準:
 - **LOOP: TOTAL** の original → OMP=8 での倍率（スケーリング）で速度向上を評価する。ステップ数が少ない（100ステップ）ため、MAIN: TOTAL にはセットアップ時間が含まれ正確な比較にならない。**常に LOOP: TOTAL を基準とする**。
 - セクション別の内訳で並列化効果を確認（特に新規並列化セクション）
-- **数値検証**: original と OMP=1 の `stage.log` を比較し、EMAX/EAVG/ECONT/FLOW の値が大きく変化していないことを確認する。last-digit の浮動小数点差（例: 0.22094 vs 0.22093）のみ許容。桁が変わるような差異があれば並列化のバグを疑う。
+- **数値検証**（2段階）:
+  1. **収束指標**: original と OMP=1 の `stage.log` を比較し、EMAX/EAVG/ECONT/FLOW の値が大きく変化していないことを確認する。last-digit の浮動小数点差（例: 0.22094 vs 0.22093）のみ許容。桁が変わるような差異があれば並列化のバグを疑う。
+  2. **全体性能**: stdout ログ（`run_*.out`）から全体の圧力比(PR)・等エントロピー効率(eta_TT, eta_TS)・出力(Power)・流量(Flow In/Out) を抽出し、original と OMP=1 で比較する。相対差 0.001% 未満であること。
+  ```bash
+  bash dev/scripts/compare_performance.sh run_original.out run_omp1.out
+  ```
 
 ### 8.5 注意事項
 

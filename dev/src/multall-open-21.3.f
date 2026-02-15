@@ -87,9 +87,6 @@ C                            SUBROUTINES.
 C   
 C
       CHARACTER*1 ANS_IN
-      INTEGER T_MAIN_NEW, T_MAIN_OLD, T_MAIN_SETUP, T_MAIN_TOTAL
-      PARAMETER (T_MAIN_NEW=1, T_MAIN_OLD=2, T_MAIN_SETUP=3,
-     & T_MAIN_TOTAL=41)
 C
       OPEN(UNIT=1,FILE='/dev/tty')
       OPEN(UNIT=4,FILE ='stage.log')
@@ -98,9 +95,6 @@ C
       OPEN(UNIT=3,FILE ='results.out')
       OPEN(UNIT=12,FILE='stopit')
       OPEN(UNIT=21,FILE='grid_out',form= 'unformatted' )
-
-      CALL TIMER_INIT
-      CALL TIMER_START(T_MAIN_TOTAL)
 C
       IFSTOP = 0
       WRITE(12,*) IFSTOP
@@ -125,16 +119,12 @@ C
 C
       IF(ANS_IN.EQ.'N'.OR.ANS_IN.EQ.'n') THEN
              WRITE(6,*) ' NEW_READIN DATA FORMAT SPECIFIED.'
-                  CALL TIMER_START(T_MAIN_NEW)
-                  CALL NEW_READIN(ANS_IN)
-                  CALL TIMER_STOP(T_MAIN_NEW)
+             CALL NEW_READIN(ANS_IN)
       ELSE
 C
       IF(ANS_IN.EQ.'O'.OR.ANS_IN.EQ.'o')THEN
              WRITE(6,*)' OLD_READIN DATA FORMAT SPECIFIED.'
-                  CALL TIMER_START(T_MAIN_OLD)
-                  CALL OLD_READIN(ANS_IN)
-                  CALL TIMER_STOP(T_MAIN_OLD)
+             CALL OLD_READIN(ANS_IN)
       ELSE
 C
       WRITE(6,*) ' STOPPING BECAUSE FILE "intype" DOES NOT CONTAIN  "O" 
@@ -146,9 +136,7 @@ C
       END IF
 C******************************************************************************
 C 
-      CALL TIMER_START(T_MAIN_SETUP)
       CALL SETUP(ANS_IN)
-      CALL TIMER_STOP(T_MAIN_SETUP)
 C
 C   LOOP calls  many other subroutines, especially TSTEP .
       CALL LOOP
@@ -3781,58 +3769,8 @@ C
 C
       DIMENSION CHECK_FLOW(JD),BLADE_FLOW(JD),ROVMSQ(KD),ANG_INC(KD),
      &          P_PSURF(JD),P_SSURF(JD),SFRAC(JD)
-
-      INTEGER T_LOOP_TOTAL, T_LOOP_COOL_BLEED, T_LOOP_INV_INPUT
-      INTEGER T_LOOP_SMOOTH, T_LOOP_VEL, T_LOOP_PRES
-      INTEGER T_LOOP_VISCOUS, T_LOOP_MASSFLUX, T_LOOP_INVFORCE
-      INTEGER T_LOOP_BOUNDARY, T_LOOP_RFLUX, T_LOOP_Q3D_FORCE
-      INTEGER T_LOOP_ZERO_MASS, T_LOOP_BLEED_SURF, T_LOOP_COOL_MASS
-      INTEGER T_LOOP_SHROUD_MASS, T_LOOP_SA_FLUX
-      INTEGER T_LOOP_ENERGY_FLUX, T_LOOP_MOM_FLUX
-      INTEGER T_MAIN_TOTAL
-      INTEGER T_LOOP_VRMS, T_LOOP_TFLOW, T_LOOP_INVSTEND
-      INTEGER T_LOOP_NOINVZERO, T_LOOP_BLEED_SURF2
-      INTEGER T_LOOP_CELLAVG
-      INTEGER T_TSTEP_DENS, T_TSTEP_SA, T_TSTEP_ROE, T_TSTEP_ROVX
-      INTEGER T_TSTEP_RORVT, T_TSTEP_ROVR
-      PARAMETER (T_LOOP_TOTAL=4)
-      PARAMETER (T_LOOP_COOL_BLEED=5)
-      PARAMETER (T_LOOP_INV_INPUT=6)
-      PARAMETER (T_LOOP_SMOOTH=7)
-      PARAMETER (T_LOOP_VEL=8)
-      PARAMETER (T_LOOP_PRES=9)
-      PARAMETER (T_LOOP_VISCOUS=10)
-      PARAMETER (T_LOOP_MASSFLUX=11)
-      PARAMETER (T_LOOP_INVFORCE=12)
-      PARAMETER (T_LOOP_BOUNDARY=13)
-      PARAMETER (T_TSTEP_DENS=14)
-      PARAMETER (T_TSTEP_SA=15)
-      PARAMETER (T_TSTEP_ROE=16)
-      PARAMETER (T_TSTEP_ROVX=17)
-      PARAMETER (T_TSTEP_RORVT=18)
-      PARAMETER (T_TSTEP_ROVR=19)
-      PARAMETER (T_LOOP_SA_FLUX=32)
-      PARAMETER (T_LOOP_RFLUX=33)
-      PARAMETER (T_LOOP_Q3D_FORCE=34)
-      PARAMETER (T_LOOP_ZERO_MASS=35)
-      PARAMETER (T_LOOP_BLEED_SURF=36)
-      PARAMETER (T_LOOP_COOL_MASS=37)
-      PARAMETER (T_LOOP_SHROUD_MASS=38)
-      PARAMETER (T_LOOP_ENERGY_FLUX=39)
-      PARAMETER (T_LOOP_MOM_FLUX=40)
-      PARAMETER (T_MAIN_TOTAL=41)
-      PARAMETER (T_LOOP_VRMS=48)
-      PARAMETER (T_LOOP_TFLOW=49)
-      PARAMETER (T_LOOP_INVSTEND=50)
-      PARAMETER (T_LOOP_NOINVZERO=51)
-      PARAMETER (T_LOOP_BLEED_SURF2=52)
-      PARAMETER (T_LOOP_CELLAVG=53)
-
-      DOUBLE PRECISION START, FINI, RUNTIME, POINTIME
 C
       SAVE START,FINI,CHECK_FLOW,BLADE_FLOW
-
-      CALL TIMER_START(T_LOOP_TOTAL)
 C
 C****************************************************************************** 
 C    SET SOME REFERENCE VALUES
@@ -3880,7 +3818,6 @@ C
 C******************************************************************************
 C     CALL COOLIN TO SET THE COOLANT SOURCE TERMS
 C
-      CALL TIMER_START(T_LOOP_COOL_BLEED)
       IF(IFCOOL.NE.0) THEN
            CALL COOL_INPUT
            WRITE(6,*) ' CALLED COOL_INPUT '
@@ -3896,14 +3833,12 @@ C
            CALL BLEEDOUT(IBLEED,KBLEED)
            WRITE(6,*) ' CALLED BLEEDOUT '
       ENDIF
-
-       CALL TIMER_STOP(T_LOOP_COOL_BLEED)
 C
 C
 C******************************************************************************
 C      CALL THE TIMING ROUTINES. THESE ARE MACHINE SPECIFIC AND MAY NEED CHANGING.
 C      CALL CLOCK@(START)
-      CALL WALLTIME(START)
+       START = FLOAT(MCLOCK())
 C
 C*************************************************************************
 C*************************************************************************
@@ -3911,7 +3846,6 @@ C
 C    START THE INVERSE MODE IF IF_INV IS NOT ZERO.
 C
       IF(IF_INV.EQ.1) THEN
-      CALL TIMER_START(T_LOOP_INV_INPUT)
 C
 C*************************************************************************
 C*************************************************************************
@@ -4095,7 +4029,6 @@ C**********************************************************************
 C**********************************************************************
 C  END OF THE INVERSE MODE DATA INPUT.
 C
-      CALL TIMER_STOP(T_LOOP_INV_INPUT)
       END IF
 C
 C*************************************************************************
@@ -4157,7 +4090,6 @@ C      IF STARTING FROM AN INITIAL GUESS.
 C
 C     8/4/2017  MODIFY THE NEXT SECTION SO THAT DAMPING AND SMOOTHING ARE INCREASED
 C     OVER THE FIRST NCHANGE STEPS EVEN WHEN STARTING FROM A RESTART FILE.
-      CALL TIMER_START(T_LOOP_SMOOTH)
       IF(IF_RESTART.NE.0.AND.NSTEP.GT.100) GO TO 5555
 C
       FCHANGE     = 1.0 -  FLOAT(NSTEP-1)/NCHANGE
@@ -4191,15 +4123,12 @@ C
 C    JUMP TO HERE IF STARTING FROM A RESTART FILE
 C
  5555 CONTINUE
-
-      CALL TIMER_STOP(T_LOOP_SMOOTH)
 C
 C*******************************************************************************
 C*******************************************************************************
 C
 C       CALCULATE VX,VR,VT FROM ROVX,ROVR,ROVT
 C
-      CALL TIMER_START(T_LOOP_VEL)
       DO 7450 K=1,KM
       DO 7450 J=2,JM
            RRNOW  = 1/R(J,K)
@@ -4210,14 +4139,11 @@ C
            ROVT(I,J,K) = RORVT(I,J,K)*RRNOW
            VT(I,J,K)   = ROVT(I,J,K)*RECIP
  7450 CONTINUE
-
-      CALL TIMER_STOP(T_LOOP_VEL)
 C
 C*******************************************************************************
 C*******************************************************************************
 C
       IF(MOD(NSTEP,5).EQ.0.OR.IFEND.EQ.1) THEN
-      CALL TIMER_START(T_LOOP_VRMS)
 C
       IF(IFCOOL.EQ.2) CALL COOLIN_2
 C
@@ -4241,7 +4167,6 @@ C
  5910 CONTINUE
       VMAX = SQRT(VMAX)
 C
-      CALL TIMER_STOP(T_LOOP_VRMS)
       ENDIF
 C
 C*******************************************************************************
@@ -4249,7 +4174,6 @@ C*******************************************************************************
 C
 C   CALCULATE NEW PRESSURES AND TEMPERATURES.THE METHOD DEPENDS ON THE FLOW MODEL, ITIMST.
 C
-      CALL TIMER_START(T_LOOP_PRES)
       IF(ITIMST.LT.5) THEN
 C
       DO 5900 K=1,KM
@@ -4337,15 +4261,12 @@ C
  5950 CONTINUE
 C     END OF ITIMST = 5  OR 6 LOOP
       END IF
-
-      CALL TIMER_STOP(T_LOOP_PRES)
 C
 C*******************************************************************************
 C*******************************************************************************
 C
 C         CALL LOSS ROUTINES TO UPDATE BODY FORCES EVERY NLOS ITERATIONS
 C
-      CALL TIMER_START(T_LOOP_VISCOUS)
 C     IF ILOS = 10  USE THE ORIGINAL MIXING LENGTH MODEL.
       IF((ILOS.EQ.10).AND.MOD(NSTEP,NLOS).EQ.0)  CALL LOSS
 C
@@ -4362,8 +4283,6 @@ C      CALL SHROUDFLOW TO SET SHROUD LEAKAGE FLUXES IF 'IFSHROUD' NE ZERO.
 C
       IF((NSTEP.EQ.1.OR.MOD(NSTEP,NLOS).EQ.0).AND.(IFSHROUD.EQ.1))
      &  CALL SHROUDFLOW
-
-      CALL TIMER_STOP(T_LOOP_VISCOUS)
 C
 C*******************************************************************************
 C*******************************************************************************
@@ -4374,7 +4293,6 @@ C       FLOWR .... MASS FLOW RATE THROUGH THE STREAM-SURFACE (TOP) FACE
 C       FLOWT .... MASS FLOW RATE THROUGH THE BLADEWISE (SIDE) FACE
 C       FLOWX .... MASS FLOW RATE THROUGH THE QUASI-ORTHOGONAL (UPSTREAM) FACE
 C
-      CALL TIMER_START(T_LOOP_MASSFLUX)
       DO 5020 K=1,KMM1
       DO 5020 J=1,JM
       DO 5020 I=1,IMM1
@@ -4419,13 +4337,10 @@ C
       TFLUX(IM,J,K)  = AVGFLUX
  5051 CONTINUE
  5050 CONTINUE
-
-      CALL TIMER_STOP(T_LOOP_MASSFLUX)
 C
 C**********************************************************************
 C    START THE TFLOW ADDITION
 C**********************************************************************
-      CALL TIMER_START(T_LOOP_TFLOW)
       IF(IM.NE.2) GO TO 5655
 C
       CSQ = GA*RGAS*TO1(KMID) * Q3DFORCE
@@ -4529,8 +4444,6 @@ C
 C
 C
  5655 CONTINUE
-
-      CALL TIMER_STOP(T_LOOP_TFLOW)
 C
 C**********************************************************************
 C   END TFLOW ADDITION
@@ -4547,7 +4460,6 @@ C     CALCULATE AND WRITE OUT THE CALCULATED SURFACE PRESSURES OF THE
 C     ORIGINAL BLADE AT TIME STEP NINV_START .
 C
       IF(IF_INV.EQ.1.AND.NSTEP.EQ.NINV_START.OR.NSTEP.EQ.NINV_END) THEN
-      CALL TIMER_START(T_LOOP_INVSTEND)
 C
       IF(NSTEP.EQ.NINV_START) OPEN(UNIT=8,FILE='initial_inverse.in')
       IF(NSTEP.EQ.NINV_END)   OPEN(UNIT=8,FILE='final_inverse.in')
@@ -4598,7 +4510,6 @@ C
 C
       CLOSE(8)
 C
-      CALL TIMER_STOP(T_LOOP_INVSTEND)
       END IF
 C
 C    END OF WRITING OUT THE INITIAL PRESSURES TO THE FILE "initial_inverse.in".
@@ -4606,7 +4517,6 @@ C
 C**********************************************************************
 C**********************************************************************
 C
-      IF(IF_INV.EQ.1) CALL TIMER_START(T_LOOP_INVFORCE)
       IF(IF_INV.EQ.1.AND.
      &  (NSTEP.GT.NINV_START.AND.NSTEP.LE.NINV_END)) THEN
 C
@@ -4856,15 +4766,12 @@ C******************************************************************************
 C      END OF INVERSE MODE GEOMETRY UPDATE
 C
       END IF
-
-      IF(IF_INV.EQ.1) CALL TIMER_STOP(T_LOOP_INVFORCE)
 C
 C******************************************************************************
 C******************************************************************************
 C
 C     IF NOT USING INVERSE MODE, SET THE MASS FLUX THROUGH BLADE SURFACES TO ZERO
 
-      CALL TIMER_START(T_LOOP_NOINVZERO)
       IF(IF_INV.EQ.0.OR.
      &(IF_INV.EQ.1.AND.(NSTEP.LT.NINV_START.OR.NSTEP.GT.NINV_END))) THEN
 C
@@ -4881,7 +4788,6 @@ C
 C
 C   END OF SETTING MASS FLUXES WHEN NO INVERSE MODE 
       END IF 
-      CALL TIMER_STOP(T_LOOP_NOINVZERO)
 C
 C   END OF INVERSE MODE IN MAIN SURROUTINE , LOOP .
 C******************************************************************************
@@ -4891,7 +4797,6 @@ C******************************************************************************
 C    REMOVE ANY BLEED FLOWS THROUGH THE BLADE SURFACES
 C
       IF(IBLEED.NE.0) THEN
-      CALL TIMER_START(T_LOOP_BLEED_SURF2)
       DO 5065 J = 2,JM
       IF(IND(J).NE.1) GO TO 5065
       DO 5064 K = 1,KMM1
@@ -4901,12 +4806,10 @@ C
       FLOWT(IM,J,K) =  BLFLOWIM(J,K)
  5064 CONTINUE
  5065 CONTINUE
-      CALL TIMER_STOP(T_LOOP_BLEED_SURF2)
       ENDIF
 C          
 C    NOW SET RFLUX TO THE MASS FLOW THROUGH THE STREAMWISE FACES.
 C  Q3D  
-      CALL TIMER_START(T_LOOP_RFLUX)
       IF(KM.NE.2) THEN
            K1 = 2
            K2 = KMM1
@@ -4915,6 +4818,7 @@ C   END Q3D
            K1 = 1
            K2 = 2
       END IF
+C
       DO 5040 K=K1,K2
       DO 5040 J=2,JM
       DO 5040 I=1,IMM1
@@ -4923,13 +4827,10 @@ C   END Q3D
       FLOWR(I,J,K)    = 0.25*(AVGRVX*ASX(I,J,K)+AVGRVR*ASR(I,J,K))
       RFLUX(I,J,K)    = FLOWR(I,J,K)
  5040 CONTINUE
-
-      CALL TIMER_STOP(T_LOOP_RFLUX)
 C
 C***************************************************************************************
 C     SET THE BODY FORCE TO KEEP THE FLOW ON THE STREAM SURFACE IF DOING A Q3D CALCULATION.
 C   Q3D
-      CALL TIMER_START(T_LOOP_Q3D_FORCE)
       IF(KM.NE.2) GO TO 5042
 C
       CSQ = GA*RGAS*TO1(1)*Q3DFORCE
@@ -4943,14 +4844,11 @@ C
  5041 CONTINUE
 C
  5042 CONTINUE
-
-      CALL TIMER_STOP(T_LOOP_Q3D_FORCE)
 C      
 C  END Q3D
 C***************************************************************************************
 C      SET ZERO MASS FLOW THROUGH THE HUB AND CASING - WHERE NO BLEED.
 C
-      CALL TIMER_START(T_LOOP_ZERO_MASS)
       DO 5045 J=2,JM
       DO 5045 I=1,IMM1
       FLOWR(I,J,1)  = 0.0
@@ -4958,8 +4856,6 @@ C
       RFLUX(I,J,1)  = 0.0
       RFLUX(I,J,KM) = 0.0
  5045 CONTINUE
-
-      CALL TIMER_STOP(T_LOOP_ZERO_MASS)
 C
 C   Q3D
       IF(KM.EQ.2) GO TO 5081
@@ -4967,7 +4863,6 @@ C   END Q3D
 C
 C     REMOVE ANY BLEED FLOWS THROUGH THE HUB OR CASING
 C
-      CALL TIMER_START(T_LOOP_BLEED_SURF)
       IF(KBLEED.NE.0) THEN
       DO 5080 J=1,JM
       DO 5080 I=1,IMM1
@@ -4977,14 +4872,11 @@ C
       RFLUX(I,J,KM)    =  FLOWR(I,J,KM)
  5080 CONTINUE
       ENDIF
-
-      CALL TIMER_STOP(T_LOOP_BLEED_SURF)
 C
  5081 CONTINUE
 C
 C     ADD COOLANT MASS FLUXES THROUGH THE BLADE SURFACES.
 C
-      CALL TIMER_START(T_LOOP_COOL_MASS)
       IF(NCOOLB.NE.0) THEN
       DO 5550 NC=1,NCOOLB
       DO 5556 J=JCBS(NC)+1,JCBE(NC)
@@ -4994,8 +4886,6 @@ C
  5556 CONTINUE
  5550 CONTINUE
       ENDIF
-
-      CALL TIMER_STOP(T_LOOP_COOL_MASS)
 C
 C
 C  Q3D
@@ -5004,7 +4894,6 @@ C  END Q3D
 C
 C     ADD COOLANT MASS FLOWS THROUGH THE HUB AND CASING
 C
-      CALL TIMER_START(T_LOOP_COOL_MASS)
       IF(NCOOLW.NE.0) THEN
       DO 5558 NC=1,NCOOLW
       DO 5559 J=JCWS(NC)+1,JCWE(NC)
@@ -5014,39 +4903,30 @@ C
  5559 CONTINUE
  5558 CONTINUE
       ENDIF
-
-      CALL TIMER_STOP(T_LOOP_COOL_MASS)
 C
  5557 CONTINUE
 C
 C***********************************************************************
 C      SET THE SHROUD LEAKAGE MASS FLUXES
 C
-      CALL TIMER_START(T_LOOP_SHROUD_MASS)
       IF(IFSHROUD.EQ.1) CALL SHROUDFLUX(SHROUDGR)
-
-      CALL TIMER_STOP(T_LOOP_SHROUD_MASS)
 C
 C*******************************************************************
 C*******************************************************************
 C       CALL SUBROUTINE TSTEP TO UPDATE THE DENSITY AT ALL POINTS
 C
 C
-       CALL TIMER_START(T_TSTEP_DENS)
-       IF(ITIMST.GE.5) THEN
+      IF(ITIMST.GE.5) THEN
            CALL TSTEP(ROSUB,DRO,1)
       ELSE
            CALL TSTEP(RO,DRO,1)
       END IF
-
-       CALL TIMER_STOP(T_TSTEP_DENS)
 C
 C***********************************************************************
 C***********************************************************************
 C   FORM THE CELL AVERAGE DENSITY IF USING NEWLOSS OR SPAL_LOSS.
 C
       IF(ILOS.GE.100) THEN
-      CALL TIMER_START(T_LOOP_CELLAVG)
 C
       DO 5600 K=1,KMM1
       DO 5600 J=2,JM
@@ -5056,7 +4936,6 @@ C
       ROAVG_CELL(I,J,K) = ROAVG
  5600 CONTINUE
 C
-      CALL TIMER_STOP(T_LOOP_CELLAVG)
       END IF
 C
 C******************************************************************************
@@ -5067,7 +4946,6 @@ C     NOTE THAT THESE AND THE SOURCE TERM ARE DOUBLED TO GIVE AN EFFECTIVE
 C     LARGER TIME STEP FOR THE TURBULENT VISCOSITY EQUATION.
 C
       IF(ILOS.GE.200) THEN
-      CALL TIMER_START(T_LOOP_SA_FLUX)
 C
       DO 6001 K = 1,KMM1
       DO 6001 J = 1,JM
@@ -5123,11 +5001,7 @@ C*******************************************************************************
 C********************************************************************************
 C     CALL TSTEP TO UPDATE THE TURBULENT VISCOSITY FOR THE SA MODEL ONLY.
 C
-      CALL TIMER_STOP(T_LOOP_SA_FLUX)
-      CALL TIMER_START(T_TSTEP_SA)
       CALL TSTEP(TRANS_DYN_VIS, DEL_DYNVIS,2)
-      CALL TIMER_STOP(T_TSTEP_SA)
-      CALL TIMER_START(T_LOOP_SA_FLUX)
 C
 C********************************************************************************
 C********************************************************************************
@@ -5143,14 +5017,12 @@ C
 C
 C     END OF SETTING THE TURBULENT VISCOSITY FLUXES FOR THE SA MODEL.
 C
-      CALL TIMER_STOP(T_LOOP_SA_FLUX)
       END IF
 C
 C******************************************************************************
 C********************************************************************************
 C   NOW WORK OUT THE FLUXES OF ENERGY AND STORE AS XFLUX, TFLUX AND RFLUX.
 C
-      CALL TIMER_START(T_LOOP_ENERGY_FLUX)
       DO 5501 K=1,KMM1
       DO 5501 J=1,JM
       DO 5501 I=1,IMM1
@@ -5261,10 +5133,7 @@ C*******************************************************************************
 C*******************************************************************************   
 C         CALL TSTEP TO UPDATE THE INTERNAL ENERGY AT ALL POINTS
 C
-            CALL TIMER_STOP(T_LOOP_ENERGY_FLUX)
-            CALL TIMER_START(T_TSTEP_ROE)
-            CALL TSTEP(ROE,DROE,3)
-            CALL TIMER_STOP(T_TSTEP_ROE)
+            CALL TSTEP(ROE,DROE,3)   
 C
 C*******************************************************************************
 C*******************************************************************************
@@ -5274,7 +5143,6 @@ C
 C*******************************************************************************
 C*******************************************************************************
 C
-      CALL TIMER_START(T_LOOP_BOUNDARY)
 C     NEXT FEW LINES MODIFIED BY JDD MAY 2021 .
       IF(PLATE_LOSS.GT.0.001) THEN
            DO 5999 K=1,KM
@@ -5704,8 +5572,6 @@ C       FLOW RATE IF IN_FLOW=3. OR TO RELAX TO AN AVERAGE FLOW IF IN_FLOW=2
 C       IN_FLOW=2  OFTEN GIVES IMPROVED CONVERGENCE.
 C
       IF(IN_FLOW.NE.0) CALL SETFLO
-
-      CALL TIMER_STOP(T_LOOP_BOUNDARY)
 C
 C    FORM PEFF TO MINIMISE ROUNDING ERRORS.
 C    ALSO ALLOW DOWNWINDING OF PRESSURE TO SMEAR SHOCKS USING  FP_DOWN .
@@ -5778,7 +5644,6 @@ C*******************************************************************************
 C       CALCULATE FLUXES FOR THE AXIAL-MOMENTUM EQUATION.
 C*******************************************************************************
 C******************************************************************************
-      CALL TIMER_START(T_LOOP_MOM_FLUX)
       DO 6100 K=1,KMM1
       DO 6100 J=1,JM
       DO 6100 I=1,IMM1
@@ -5867,17 +5732,13 @@ C******************************************************************************
 C******************************************************************************
 C      CALL SUBROUTINE TSTEP TO UPDATE THE AXIAL-MOMENTUM
 C
-      CALL TIMER_STOP(T_LOOP_MOM_FLUX)
-      CALL TIMER_START(T_TSTEP_ROVX)
       CALL TSTEP(ROVX,DROVX,4)
-      CALL TIMER_STOP(T_TSTEP_ROVX)
 C
 C******************************************************************************
 C******************************************************************************
 C       CALCULATE FLUXES FOR MOMENT OF MOMENTUM EQUATION.
 C******************************************************************************
 C
-      CALL TIMER_START(T_LOOP_MOM_FLUX)
       DO 6200 K=1,KMM1
       DO 6200 J=1,JM
       AVGR  =  0.125*(R(J,K)+R(J,K+1))
@@ -5961,16 +5822,12 @@ C*******************************************************************************
 C******************************************************************************
 C       CALL SUBROUTINE TSTEP TO UPDATE THE MOMENT OF MOMENTUM
 C
-      CALL TIMER_STOP(T_LOOP_MOM_FLUX)
-      CALL TIMER_START(T_TSTEP_RORVT)
       CALL TSTEP(RORVT,DRORVT,5)
-      CALL TIMER_STOP(T_TSTEP_RORVT)
 C
 C*******************************************************************************
 C******************************************************************************
 C       CALCULATE FLUXES FOR THE RADIAL MOMENTUM EQUATION
 C******************************************************************************
-      CALL TIMER_START(T_LOOP_MOM_FLUX)
 C
       DO 6300 K=1,KMM1
       DO 6300 J=1,JM
@@ -6074,10 +5931,7 @@ C******************************************************************************
 C******************************************************************************
 C       CALL SUBROUTINE TSTEP TO UPDATE THE RADIAL-MOMENTUM
 C
-      CALL TIMER_STOP(T_LOOP_MOM_FLUX)
-      CALL TIMER_START(T_TSTEP_ROVR)
       CALL TSTEP(ROVR,DROVR,6)
-      CALL TIMER_STOP(T_TSTEP_ROVR)
 C
 C******************************************************************************
 C******************************************************************************
@@ -6374,14 +6228,14 @@ C     THE FOLLOWING TIMING CALL WILL DIFFER FOR DIFFERENT COMPUTERS.
 C
       IF(MOD(NSTEP,50).EQ.0) THEN
 C      CALL CLOCK@(FINI)
-      CALL WALLTIME(FINI)
-      RUNTIME   = (FINI - START)/50.0D0
+      FINI = FLOAT(MCLOCK())
+      RUNTIME   = (FINI - START)/50*1.0E-06
       POINTIME  = RUNTIME/(IM*JM*KM)
-      WRITE(6,*) ' WALL TIME PER STEP=', RUNTIME, 'SECONDS.',
-     & ' WALL TIME PER POINT PER STEP=', POINTIME,'SECONDS.'
+      WRITE(6,*) ' CPU TIME PER STEP=', RUNTIME, 'SECONDS.',
+     & ' CPU TIME PER POINT PER STEP=', POINTIME,'SECONDS.'
       WRITE(6,*)
 C      CALL CLOCK@(START)
-      CALL WALLTIME(START)
+      START = FLOAT(MCLOCK())
       ENDIF
 C
 C******************************************************************************
@@ -6432,7 +6286,7 @@ C
 C*****************************************************************************
 C******************************************************************************
 C     END OF TIMING CALL
-C
+C******************************************************************************
 C******************************************************************************
 C     WRITE OUT A SUMMARY TO THE SCREEN EVERY 5 STEPS
 C     JDD ADDED MAXIMUM MACH NUMBER TO OUTPUT. MAY 2021 .
@@ -6463,9 +6317,6 @@ C    CALL MIX_BCONDS TO WRITE OUT THE PITCHWISE AVERAGE VALUES AT THE MIXING PLA
 C
       IF(IFEND.EQ.1) THEN
       CALL MIX_BCONDS(1)
-      CALL TIMER_STOP(T_MAIN_TOTAL)
-      CALL TIMER_STOP(T_LOOP_TOTAL)
-      CALL TIMER_REPORT
       END IF
 C
 C*******************************************************************************
@@ -6503,20 +6354,10 @@ C       ====================
 C
       DIMENSION D(ID,JD,KD), DIFF(ID,JD,KD),AVG(KD),
      &          B1CHG(IG1,JG1,KG1),B2CHG(IG2,JG2,KG2),SBCHG(JD)
-
-      INTEGER T_TSTEP_MULTI, T_TSTEP_TIPGAP, T_TSTEP_FEXTRAP
-      INTEGER T_TSTEP_DELTA, T_TSTEP_PITCH, T_TSTEP_MG
-      INTEGER T_TSTEP_STEP, T_TSTEP_SA_SPECIAL, T_TSTEP_CELLNODE
-      INTEGER T_TSTEP_SMOOTHVAR, T_TSTEP_FINAL, T_TSTEP_PITCH2
-      PARAMETER (T_TSTEP_MULTI=20, T_TSTEP_TIPGAP=21, T_TSTEP_FEXTRAP=22,
-     & T_TSTEP_DELTA=23, T_TSTEP_PITCH=24, T_TSTEP_MG=25, T_TSTEP_STEP=26,
-     & T_TSTEP_SA_SPECIAL=27, T_TSTEP_CELLNODE=28, T_TSTEP_SMOOTHVAR=29,
-     & T_TSTEP_FINAL=30, T_TSTEP_PITCH2=31)
 C
 C******************************************************************************
 C     SET THE MULTIGRID CHANGES TO ZERO
 C
-      CALL TIMER_START(T_TSTEP_MULTI)
       DO 110 K=1,NKB1
       DO 110 J=1,NJB1+1
       DO 110 I=1,NIB1
@@ -6530,12 +6371,9 @@ C
       DO 310 J = 1,NSBLK
       SBCHG(J) = 0.0
   310 CONTINUE
-
-      CALL TIMER_STOP(T_TSTEP_MULTI)
 C*******************************************************************************
 C     BALANCE FLUXES ACROSS THE TIP GAP
 C
-      CALL TIMER_START(T_TSTEP_TIPGAP)
       DO 520 J=2,JM
       NR = NROW(J)
       IF(KTIPS(NR).LE.0) GO TO 520
@@ -6544,14 +6382,11 @@ C
       TFLUX(IM,J,K) = TFLUX(1,J,K)
   521 CONTINUE
   520 CONTINUE
-
-      CALL TIMER_STOP(T_TSTEP_TIPGAP)
 C
 C***********************************************************
 C     EXTRAPOLATE THE FLUXES ON THE UPSTREAM FACE OF THE MIXING PLANES. 
 C     UNLESS FEXTRAP = 0.0
 C 
-      CALL TIMER_START(T_TSTEP_FEXTRAP)
       IF(FEXTRAP.LT.0.001) GO TO 4141
 
       DO 4140 NR = 1,NRWSM1
@@ -6592,13 +6427,10 @@ C
  4140 CONTINUE
 
  4141 CONTINUE
-
-      CALL TIMER_STOP(T_TSTEP_FEXTRAP)
 C*******************************************************************************
 C*******************************************************************************
 C      SUM THE FLUXES TO FORM CHANGE AND SAVE IT IN STORE(I,J,K) 
 C
-      CALL TIMER_START(T_TSTEP_DELTA)
       DO 1000 K=1,KMM1
       DO 1000 J=2,JM
       RATPITCH = FLOAT(NBLADE(J-1))/NBLADE(J)
@@ -6610,8 +6442,6 @@ C
       STORE(I,J,K)  = F1*DELTA + F2*DIFF(I,J,K)
       DIFF(I,J,K)   = DELTA    + F3*DIFF(I,J,K)
  1000 CONTINUE
-
-      CALL TIMER_STOP(T_TSTEP_DELTA)
 C
 C**********************************************************************************
 C**********************************************************************************
@@ -6619,7 +6449,6 @@ C     PITCHWISE AVERAGE THE CHANGES AT ANY MIXING PLANES
 C     THIS IS ONLY DONE ON THE DOWNSTREAM FACE OF THE MIXING PLANE UNLESS FEXTRAP = 0
 C     IN WHICH CASE IT IS DONE ON BOTH SIDES AS IN TBLOCK-13.
 C
-      CALL TIMER_START(T_TSTEP_PITCH)
       DO 1750 NR = 1,NRWSM1
       J   = JMIX(NR)
       DO 1790 K = 1,KMM1
@@ -6650,14 +6479,11 @@ C
  1790 CONTINUE
 C
  1750 CONTINUE
-
-      CALL TIMER_STOP(T_TSTEP_PITCH)
 C
 C*******************************************************************************
 C*******************************************************************************
 C    JUMP TO 1020  IF NO MULTIGRID. THIS IS VERY UNUSUAL.
 C
-      CALL TIMER_START(T_TSTEP_MG)
       IF(IR.LE.1.AND.JR.LE.1.AND.KR.LE.1) GO TO 1020
 C
 C*******************************************************************************
@@ -6683,8 +6509,6 @@ C
   700 CONTINUE
 C
  1020 CONTINUE
-
-      CALL TIMER_STOP(T_TSTEP_MG)
 C
 C*******************************************************************************
 C*******************************************************************************
@@ -6692,7 +6516,6 @@ C     ADD THE BLOCK CHANGES TO THE ELEMENT CHANGES, MULTIPLY BY THE TIME STEP
 C     JDD REMOVED THE CALCULATION OF THE AVERAGE CHANGE FROM THIS APRIL 2018.
 C     IT IS NOW CALCULATED IN THE DO 1501 LOOP.
 C
-      CALL TIMER_START(T_TSTEP_STEP)
       DO 1500 K=1,KMM1
       K1 = KB1(K)
       K2 = KB2(K)
@@ -6784,10 +6607,7 @@ C*****************************************************************************
 C******************************************************************************
 C   NEXT IS SPECIAL TREATMENT FOR THE TURBULENT VISCOSITY IF USING THE SA MODEL
 C
-      CALL TIMER_STOP(T_TSTEP_STEP)
-
       IF(NCALL.EQ.2) THEN
-      CALL TIMER_START(T_TSTEP_SA_SPECIAL)
 C  
 C     UPDATE THE TURBULENT VISCOSITY - REMEMBERNG THAT IT IS CELL CENTRED.
 C    
@@ -6824,7 +6644,6 @@ C
       CALL SMOOTH_RESID(D,SFTVIS,NSMTH)
 C
 C     JUMP TO 8700 FOR THE TURBULENT VISCOSITY ONLY
-      CALL TIMER_STOP(T_TSTEP_SA_SPECIAL)
       GO TO 8700
 C
 C   END OF SPECIAL TREATMENT FOR THE TURBULENT VISCOSITY
@@ -6838,7 +6657,6 @@ C     MULTIGRID AND MULTIPLYING BY THE TIMESTEP.
 C     THIS IS ONLY DONE ON THE DOWNSTREAM FACE OF THE MIXING PLANE UNLESS  FEXTRAP = 0
 C     IN WHICH CASE IT IS DONE ON BOTH SIDES AS IN TBLOCK-13.
 C
-      CALL TIMER_START(T_TSTEP_PITCH2)
       DO 1850 NR = 1,NRWSM1
       J   = JMIX(NR)
       JP1 = J+1
@@ -6872,8 +6690,6 @@ C
  1890 CONTINUE
 C
  1850 CONTINUE
-
-      CALL TIMER_STOP(T_TSTEP_PITCH2)
 C
 C****************************************************************************
 C****************************************************************************
@@ -6883,7 +6699,6 @@ C              WITH DOUBLE WEIGHTING AT THE BOUNDARIES.
 C              THE FACTOR OF 1/8 IS INCLUDED IN THE 'FMI' TERMS.
 C****************************************************************************
 C
-      CALL TIMER_START(T_TSTEP_CELLNODE)
       DO 1100 K=1,KMM1
       DO 1100 J=2,JM
       DO 1100 I=1,IMM1
@@ -6899,16 +6714,12 @@ C
       D(I,J-1,K+1)  =  D(I,J-1,K+1)   + ADD*FTL(I,K)*FACUP(J)
       D(I+1,J-1,K+1)=  D(I+1,J-1,K+1) + ADD*FTR(I,K)*FACUP(J)
  1100 CONTINUE
-
-      CALL TIMER_STOP(T_TSTEP_CELLNODE)
 C
 C************************************************************************************
 C************************************************************************************
 C    CALLL  "SMOOTHVAR" TO APPLY THE SMOOTHING (ARTIFICIAL VISCOSITY) TO THE VARIABLE "D". 
 C
-      CALL TIMER_START(T_TSTEP_SMOOTHVAR)
       CALL SMOOTH_VAR(D)
-      CALL TIMER_STOP(T_TSTEP_SMOOTHVAR)
 C
 C*******************************************************************************
 C*******************************************************************************
@@ -6918,7 +6729,6 @@ C*******************************************************************************
 C*******************************************************************************
 C**********APPLY THE PERIODIC BOUNDARY CONDITIONS AT I=1 AND IM ***************
 C  
-      CALL TIMER_START(T_TSTEP_FINAL)
       ILAST = IM
       IF(NCALL.EQ.2) ILAST = IMM1
 C
@@ -6988,8 +6798,6 @@ C
 C     END OF  MIXING PLANE TREATMENT
 C
  1400 CONTINUE
-
-                  CALL TIMER_STOP(T_TSTEP_FINAL)
 C
 C*******************************************************************************
 C*******************************************************************************
@@ -17056,13 +16864,6 @@ C
       INCLUDE 'commall-open-21.3'
 C
       DIMENSION D(ID,JD,KD),AVG(JD),CURVE(JD),SCURVE(JD)
-      INTEGER T_SV_STREAM, T_SV_LEAD
-      INTEGER T_SV_RESET, T_SV_PITCH, T_SV_EXIT
-      PARAMETER (T_SV_STREAM=42)
-      PARAMETER (T_SV_LEAD=44)
-      PARAMETER (T_SV_RESET=45)
-      PARAMETER (T_SV_PITCH=46)
-      PARAMETER (T_SV_EXIT=47)
       NUM3  = 3
 C
 C******************************************************************************************
@@ -17075,7 +16876,6 @@ C
 C
 C      STREAMWISE SMOOTHING WITH CONSTANT COEFFICIENT, SFX
 C
-      CALL TIMER_START(T_SV_STREAM)
       DO 3990 NR = 1,NROWS
            J1 = JSTART(NR)
            J2 = JMIX(NR)
@@ -17114,11 +16914,8 @@ C
      &                  + 0.5*D(I,J2-3,K) - 0.75*D(I,J2-4,K) )
 C
  3910 CONTINUE
-
 C
  3990 CONTINUE
-
-      CALL TIMER_STOP(T_SV_STREAM)
 C
 C     END OF STREAMWISE SMOOTHING
 C
@@ -17127,7 +16924,6 @@ C*******************************************************************************
 C
 C      NOW APPLY SPECIAL SMOOTHING AROUND THE LEADING EDGE
 C
-      CALL TIMER_START(T_SV_LEAD)
       DO 4006 NR = 1,NROWS
       JS = JLED(NR)-2
       JE = JS + 1
@@ -17146,11 +16942,9 @@ C
      &                       (D(IM,J+1,K)+D(1,J,K))
  4007 CONTINUE
  4006 CONTINUE
-      CALL TIMER_STOP(T_SV_LEAD)
 C*******************************************************************************
 C     RE-SET THE VARIABLE   "D"  TO THE NEW SMOOTHED VALUE..
 C
-      CALL TIMER_START(T_SV_RESET)
       DO 4015 NR = 1,NROWS
       J1 = JSTART(NR)
       J2 = JMIX(NR)
@@ -17159,8 +16953,6 @@ C
       DO 4015 I  = 1,IM
       D(I,J,K)   = STORE(I,J,K)
  4015 CONTINUE
-
-      CALL TIMER_STOP(T_SV_RESET)
 C
 C*******************************************************************************
 C*******************************************************************************
@@ -17175,7 +16967,6 @@ C
 C      
 C          NOW PERFORM THE PITCHWISE AND SPANWISE SMOOTHING.
 C
-      CALL TIMER_START(T_SV_PITCH)
       DO 9000 J=2,JM
 C  TFLOW ADDITION
       IF(IM.EQ.2) GO TO 9101
@@ -17259,8 +17050,6 @@ C
       D(1,J,KM) = SFT1*D(1,J,KM) + SFTH*(D(1,J,KMM1)+D(2,J,KM))
       D(IM,J,KM)= SFT1*D(IM,J,KM)+ SFTH*(D(IMM1,J,KM)+D(IM,J,KMM1))
  9000 CONTINUE
-
-      CALL TIMER_STOP(T_SV_PITCH)
 C
 C*******************************************************************************
 C
@@ -17274,7 +17063,6 @@ C
       IF(SFEXIT.LT.0.0001) GO TO 8700
 C      
       JSSTART = JM + 1 - NSFEXIT
-      CALL TIMER_START(T_SV_EXIT)
       DO 8502 J= JSSTART,JM
 C   SMOOTH IN THE "I" DIRECTION
 C
@@ -17305,8 +17093,6 @@ C
  8602 CONTINUE
 C
  8502 CONTINUE
-
-      CALL TIMER_STOP(T_SV_EXIT)
 C
 C
  8700 CONTINUE
@@ -19300,154 +19086,6 @@ C
 C
 C***********************************************************************************
 C***********************************************************************************
-
-       SUBROUTINE WALLTIME(T)
-       DOUBLE PRECISION T
-       INTEGER COUNT, RATE, MAX
-       SAVE RATE, MAX
-       DATA RATE /0/, MAX /0/
-
-       IF(RATE.EQ.0) THEN
-             CALL SYSTEM_CLOCK(COUNT, RATE, MAX)
-             IF(RATE.LE.0) RATE = 1
-       END IF
-       CALL SYSTEM_CLOCK(COUNT)
-       T = DBLE(COUNT)/DBLE(RATE)
-       RETURN
-       END
-
-C******************************************************************************
-
-       SUBROUTINE TIMER_INIT
-      INTEGER NT
-      PARAMETER (NT=53)
-       DOUBLE PRECISION TSTART, TACCUM
-       COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
-       INTEGER I
-
-       DO 10 I=1,NT
-             TSTART(I) = 0.0D0
-             TACCUM(I) = 0.0D0
-   10 CONTINUE
-       RETURN
-       END
-
-C******************************************************************************
-
-       SUBROUTINE TIMER_START(ID)
-       INTEGER ID
-      INTEGER NT
-      PARAMETER (NT=53)
-       DOUBLE PRECISION TSTART, TACCUM, NOW
-       COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
-
-       CALL WALLTIME(NOW)
-       TSTART(ID) = NOW
-       RETURN
-       END
-
-C******************************************************************************
-
-       SUBROUTINE TIMER_STOP(ID)
-       INTEGER ID
-      INTEGER NT
-      PARAMETER (NT=53)
-       DOUBLE PRECISION TSTART, TACCUM, NOW
-       COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
-
-       CALL WALLTIME(NOW)
-       TACCUM(ID) = TACCUM(ID) + (NOW - TSTART(ID))
-       RETURN
-       END
-
-C******************************************************************************
-
-       SUBROUTINE TIMER_REPORT
-      INTEGER NT
-      PARAMETER (NT=53)
-       DOUBLE PRECISION TSTART, TACCUM
-       COMMON /TIMERS/ TSTART(NT), TACCUM(NT)
-      CHARACTER*40 NAME(NT)
-       INTEGER I
-
-                   DATA NAME(1)  /'MAIN: NEW_READIN'/
-                   DATA NAME(2)  /'MAIN: OLD_READIN'/
-                   DATA NAME(3)  /'MAIN: SETUP'/
-                   DATA NAME(4)  /'LOOP: TOTAL'/
-                   DATA NAME(5)  /'LOOP: COOL/BLEED INIT'/
-                   DATA NAME(6)  /'LOOP: INVERSE INPUT'/
-                   DATA NAME(7)  /'LOOP: SMOOTH/DAMP'/
-                   DATA NAME(8)  /'LOOP: VELOCITY UPDATE'/
-                   DATA NAME(9)  /'LOOP: PRESSURE/TEMP'/
-                   DATA NAME(10) /'LOOP: VISCOUS/TURB MODEL'/
-                   DATA NAME(11) /'LOOP: MASS FLUX'/
-                   DATA NAME(12) /'LOOP: INVERSE FORCE/GEOM'/
-                   DATA NAME(13) /'LOOP: BOUNDARY/LEAK/COOL'/
-                   DATA NAME(14) /'TSTEP: DENSITY'/
-                   DATA NAME(15) /'TSTEP: SA VISC'/
-                   DATA NAME(16) /'TSTEP: ENERGY'/
-                   DATA NAME(17) /'TSTEP: MOMENTUM-X'/
-                   DATA NAME(18) /'TSTEP: MOMENTUM-T'/
-                   DATA NAME(19) /'TSTEP: MOMENTUM-R'/
-                   DATA NAME(20) /'TSTEP: MG INIT'/
-                   DATA NAME(21) /'TSTEP: TIP GAP'/
-                   DATA NAME(22) /'TSTEP: FEXTRAP'/
-                   DATA NAME(23) /'TSTEP: DELTA/STORE'/
-                   DATA NAME(24) /'TSTEP: PITCH AVG'/
-                   DATA NAME(25) /'TSTEP: MG AGG'/
-                   DATA NAME(26) /'TSTEP: STEP/DAMP'/
-                   DATA NAME(27) /'TSTEP: SA SPECIAL'/
-                   DATA NAME(28) /'TSTEP: CELL->NODE'/
-                   DATA NAME(29) /'TSTEP: SMOOTH_VAR'/
-                   DATA NAME(30) /'TSTEP: FINAL AVG'/
-                  DATA NAME(31) /'TSTEP: PITCH AVG POST-MG'/
-                  DATA NAME(32) /'LOOP: SA FLUX SETUP'/
-                  DATA NAME(33) /'LOOP: MASS FLUX RFLUX'/
-                  DATA NAME(34) /'LOOP: Q3D BODY FORCE'/
-                  DATA NAME(35) /'LOOP: ZERO MASS HUB/CASING'/
-                  DATA NAME(36) /'LOOP: BLEED HUB/CASING'/
-                  DATA NAME(37) /'LOOP: COOLANT MASS FLUX'/
-                  DATA NAME(38) /'LOOP: SHROUD MASS FLUX'/
-                  DATA NAME(39) /'LOOP: ENERGY FLUX/SOURCE'/
-                  DATA NAME(40) /'LOOP: MOMENTUM FLUX BUILD'/
-                  DATA NAME(41) /'MAIN: TOTAL WALL TIME'/
-                  DATA NAME(42) /'SMOOTH_VAR: STREAMWISE CORE'/
-                  DATA NAME(43) /' '/
-                  DATA NAME(44) /'SMOOTH_VAR: LEADING EDGE'/
-                  DATA NAME(45) /'SMOOTH_VAR: RESET D'/
-                  DATA NAME(46) /'SMOOTH_VAR: PITCH/SPANWISE'/
-                  DATA NAME(47) /'SMOOTH_VAR: EXIT FLOW'/
-                  DATA NAME(48) /'LOOP: VRMS/VMAX (E5)'/
-                  DATA NAME(49) /'LOOP: TFLOW ADDITION'/
-                  DATA NAME(50) /'LOOP: INV START/END OUT'/
-                  DATA NAME(51) /'LOOP: NO-INV SURF ZERO'/
-                  DATA NAME(52) /'LOOP: BLEED SURF FLUX'/
-                  DATA NAME(53) /'LOOP: CELL AVG DENSITY'/
-
-       WRITE(4,*)
-       WRITE(4,*) '================ WALL TIME SUMMARY (s) ================'
-       WRITE(4,1000) 'ID', 'SECTION', 'SECONDS'
-       DO 20 I=1,NT
-             IF(NAME(I).NE.' ') THEN
-                   WRITE(4,1001) I, NAME(I), TACCUM(I)
-             END IF
-   20 CONTINUE
-       WRITE(4,*) '========================================================'
-
-       WRITE(6,*)
-       WRITE(6,*) '================ WALL TIME SUMMARY (s) ================'
-       WRITE(6,1000) 'ID', 'SECTION', 'SECONDS'
-       DO 30 I=1,NT
-             IF(NAME(I).NE.' ') THEN
-                   WRITE(6,1001) I, NAME(I), TACCUM(I)
-             END IF
-   30 CONTINUE
-       WRITE(6,*) '========================================================'
-
- 1000 FORMAT(A3,2X,A40,2X,A8)
- 1001 FORMAT(I3,2X,A40,2X,F12.4)
-       RETURN
-       END
 C
       SUBROUTINE TABSEARCH(RHOIN,UIN,PFOUND,TFOUND,ENTFOUND,GAFOUND,
      &           DRYFOUND)
