@@ -182,8 +182,95 @@ LOOP: TOTAL は 123.7s → 129.6s と悪化しているが、他セクション�
 
 ---
 
+## HP Steam 全セクション ボトルネック分析（AWS c7i, ~5676ステップ収束）
+
+AWS `aws_results_1421` の original/OMP=1/2/4/8 タイマーデータを全セクション分析。
+
+### スケーリング分類
+
+| 分類 | セクション | OMP=1→8 倍率 | OMP=8 時間 | 備考 |
+|---|---|---:|---:|---|
+| **Excellent (7x+)** | DELTA/STORE | 7.51x | 6.9s | |
+| **Good (5-7x)** | MOM FLUX BUILD | 6.76x | 15.5s | |
+| | CELL->NODE | 6.42x | 9.0s | |
+| | SMOOTH_VAR 全体 | 5.58x | 20.2s | 最大ボトルネック |
+| | PRES/TEMP | 5.48x | 4.6s | |
+| **MemBound (4.5-5x)** | DEN UPDATE | 4.87x | 12.9s | K-stride 512KB |
+| | ENE UPDATE | 4.78x | 12.8s | K-stride 512KB |
+| | MOM-X UPDATE | 4.71x | 12.8s | K-stride 512KB |
+| | MOM-T UPDATE | 4.70x | 12.6s | K-stride 512KB |
+| | MOM-R UPDATE | 4.67x | 12.7s | K-stride 512KB |
+| **Low (3-4.5x)** | STEP/DAMP | 4.29x | 13.2s | BARRIER 多数 |
+| | SMOOTH STREAMWISE | 3.64x | 6.7s | |
+| | SMOOTH RESET D | 3.87x | 3.3s | |
+| **Worst (<3x)** | MG AGG | 2.75x | 9.0s | → COLLAPSE(2) で 7.56s に改善 |
+| **Inverse** | FINAL AVG | 0.78x | 2.9s | SINGLE 区間主体 |
+
+### DEN/ENE/MOM のメモリバウンド分析
+
+5セクションがすべて 4.7-4.9x で揃っている → **メモリバウンド**。
+
+原因: `STORE(ID,JD,KD)` = `STORE(128,1000,82)` の静的確保:
+- K方向ストライド = `ID × JD × 4bytes` = **512KB**
+- HP Steam の実使用サイズ: IM=37, JM=434, KM=37
+- 理想ストライド = `37 × 434 × 4` = **64KB**（L1 キャッシュ 48KB に近い）
+- → **8倍もの無駄なストライド** がキャッシュミスを誘発
+
+### STORE 配列の静的確保問題
+
+`commall-open-21.3` の PARAMETER:
+```
+PARAMETER(ID=128, JD=1000, KD=82, MAXKI=128, NRS=21)
+```
+
+これは Fortran 77 の COMMON ブロック制約（静的確保必須）により、最大メッシュサイズに合わせて固定されている。HP Steam (37×434×37) では 128×1000×82 の約 6% しか使用していない。
+
+### 解決策の評価
+
+| 方法 | K-stride | メモリ/配列 | 工数 | リスク |
+|---|---|---:|---|---|
+| 現状 (PARAMETER固定) | 512KB | 41.9MB | — | — |
+| **B) PARAMETER値チューニング** | 80KB | 3.2MB | 極小 (1行) | 低（再コンパイル要） |
+| **C) MODULE + ALLOCATABLE** | 64KB | 2.4MB | 中 (4-5h) | 低 |
+
+### MODULE + ALLOCATABLE リファクタリングの実現性
+
+当初「別プロジェクトレベル」と過大評価したが、実際の作業量を精査:
+
+- COMMON ブロック: **35個** → MODULE 内の変数宣言に変換
+- `INCLUDE 'commall-open-21.3'`: **47箇所** → `USE multall_data` に置換（sed 一発）
+- ローカル `DIMENSION D(ID,JD,KD)`: **11箇所** → `D(IM,JM,KM)` に（F90自動配列）
+- ローカル `DIMENSION X(JD)` 等: **~30箇所** → `X(JM)` 等に
+- ALLOCATE サブルーチン: **1個** 新規作成（メッシュ読み込み後に呼ぶ）
+
+**合計: 4-5時間**。機械的作業が大半。
+
+期待効果（HP Steam の場合）:
+- 全3D配列の K-stride: 512KB → 64KB（8倍改善）
+- DEN/ENE/MOM系の 4.7-4.9x → 6-7x への改善が期待できる
+- 総メモリ削減: ~数GB → ~数百MB
+
+---
+
+## コード規則の更新
+
+`copilot-instructions.md` のセクション 1 を更新:
+- 旧: "Fixed-Form Fortran 基本規則" — `.f90` 禁止、fixed-form のみ
+- 新: "Fortran 基本規則" — MODULE/ALLOCATABLE/USE を積極的に活用可、MODULE は `.f90` で作成可
+
+これにより COMMON → MODULE + ALLOCATABLE のリファクタリングがルール上も可能に。
+
+---
+
 ### 次のアクション
-- 修正済み `run_full_benchmark.sh` を AWS に転送して再実行
-- SMOOTH_VAR (21.6s, 最大ボトルネック) の改善検討
-- STEP/DAMP は COLLAPSE(2) 適用の余地あり（DO 1502 の K×J 結合、数値差なし）
-- CELL->NODE (11.0s) のスケーリング改善検討
+
+#### 優先度 高
+1. **MODULE + ALLOCATABLE リファクタリング**: COMMON → MODULE 化で STORE 等の配列ストライドを最適化。DEN/ENE/MOM系 5セクション（計63.8s@OMP=8）のメモリバウンドを改善
+2. **フルベンチマーク**: 修正済み `run_full_benchmark.sh` を AWS で再実行（リファクタリングの前後比較用ベースライン）
+
+#### 優先度 中
+3. **SMOOTH_VAR STREAMWISE/RESET D** (計10.0s): 3.6-3.9x のスケーリング改善
+4. **STEP/DAMP COLLAPSE(2)**: DO 1502 の K×J 結合（数値差なし、DAMP feedback に影響しない部分）
+
+#### 優先度 低
+5. **K-only ループの COLLAPSE(2)**: KMM1=36 のみの並列ループで trip 数を増やす

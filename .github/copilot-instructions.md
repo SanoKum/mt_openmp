@@ -1,16 +1,18 @@
 # MULTALL Project — Copilot Instructions
 
-このリポジトリは Fortran **fixed-form (.f)** の CFD ソルバです。
+このリポジトリは Fortran CFD ソルバです。
 以下のルールを **すべてのコード生成・編集で厳守** してください。
 
 ---
 
-## 1. Fixed-Form Fortran 基本規則
+## 1. Fortran 基本規則
 
-- ソースは **fixed-form (`.f`)** のみ。free-form (`.f90`) は使わない。
-- コードは **列 7〜72** に収める。
+- メインソース (`.f`) は **fixed-form** で記述する。
+- Fortran 90 以降の機能（`MODULE`, `ALLOCATABLE`, `USE` 等）を **積極的に活用してよい**。
+- MODULE ファイルは free-form (`.f90`) で作成してもよい。
+- fixed-form コードでは **列 7〜72** に収める。
 - 継続行は **列 6 に `&` 等の継続文字**。
-- コメントは **列 1 に `C` または `c`**。`!` によるインラインコメントは使わない。
+- コメントは **列 1 に `C` または `c`**。`!` によるインラインコメントは使わない（fixed-form ファイル内）。
 
 ---
 
