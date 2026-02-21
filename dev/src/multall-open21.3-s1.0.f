@@ -138,7 +138,7 @@ C
 C
       IF(ANS_IN.EQ.'O'.OR.ANS_IN.EQ.'o')THEN
              WRITE(6,*)' OLD_READIN DATA FORMAT SPECIFIED.'
-                  CALL ALLOC_MULTALL_DATA(128,1000,82,0)
+                  CALL ALLOC_MULTALL_DATA(64,2500,82,0)
                   CALL TIMER_START(T_MAIN_OLD)
                   CALL OLD_READIN(ANS_IN)
                   CALL TIMER_STOP(T_MAIN_OLD)

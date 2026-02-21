@@ -1,0 +1,608 @@
+C======================================================================
+C     MODULE MULTALL_DATA
+C     Replaces all COMMON blocks from commall-open-21.3
+C     ID, JD, KD are runtime variables; arrays use _DIM PARAMETERs
+C======================================================================
+      MODULE MULTALL_DATA
+      IMPLICIT NONE
+      SAVE
+C
+C --- Dimension PARAMETERs (same as original commall-open-21.3) ---
+C
+      INTEGER, PARAMETER :: ID = 128
+      INTEGER, PARAMETER :: JD = 1000
+      INTEGER, PARAMETER :: KD = 82
+      INTEGER, PARAMETER :: MAXKI = 128
+      INTEGER, PARAMETER :: NRS = 21
+      INTEGER, PARAMETER :: IG1 = 32, JG1 = 1000, KG1 = 41
+      INTEGER, PARAMETER :: IG2 = 25, JG2 = 500, KG2 = 21
+      INTEGER, PARAMETER :: JG3 = 100, NCWL = 100, NBLED = 25
+      INTEGER, PARAMETER :: ITB = 150, JTB = 150
+C
+C --- Aliases for future ALLOCATABLE migration ---
+C
+      INTEGER, PARAMETER :: ID = ID
+      INTEGER, PARAMETER :: JD = JD
+      INTEGER, PARAMETER :: KD = KD
+C
+C --- Allocation tracking ---
+C
+      INTEGER :: IM_ALLOC = 0, JM_ALLOC = 0
+      INTEGER :: KM_ALLOC = 0, NROWS_ALLOC = 0
+      INTEGER :: IALLOC_STATE = 0
+C
+C=== BKUTIL ===========================================================
+C
+      INTEGER :: NAME(18)
+      REAL :: STORE(ID,JD,KD)
+      REAL :: TEMP1(ID,JD,KD)
+      REAL :: TEMP2(ID,JD,KD)
+      REAL :: TEMP3(ID,JD,KD)
+      REAL :: TEMP4(ID,JD,KD)
+      REAL :: STORE2(ID,JD,KD)
+      REAL :: SGEN(ID,JD,KD)
+      REAL :: PI, DEGRAD, RADDEG
+C
+C=== BKINTG ===========================================================
+C
+      INTEGER :: IM,JM,KM,IMM1,JMM1,KMM1,IMM2,JMM2,KMM2
+      INTEGER :: IN_VTAN,INSURF,NOSECT,NSECS_IN,IN_VR
+      INTEGER :: NSTEPS_MAX,NSTEP,ISMTH,JLEP1,IPOUT,ITIMST
+      INTEGER :: IF_RESTART,NSTART,IMID,KMID,IBOUND
+      INTEGER :: IOUT(20),KOUT(MAXKI),NOUT(5)
+      INTEGER :: JLE(MAXKI),JTE(MAXKI)
+      INTEGER :: IFSHROUD,IFCOOL,IFBLEED,KIN,IFPRINT,IFEND
+      INTEGER :: NSFEXIT,NSECS_ROW,IN_PRESS,IF_WAVE
+      INTEGER :: INDLETE(JD)
+C
+C=== BKGEOM ===========================================================
+C
+      REAL :: X(JD,KD), R(JD,KD)
+      REAL :: RSURF(JD,KD), SMERID(JD,KD)
+      REAL :: XSURF(JD,KD), DS(JD,KD)
+      REAL :: RAVG_CELL(JD,KD), RCYL(MAXKI)
+      REAL :: DR(JD,KD)
+      REAL :: THETA(ID,JD,KD)
+      REAL :: DX(JD,KD)
+      REAL :: RT_UPP(JD,KD), RT_THICK(JD,KD)
+      REAL :: RT_PITCH(JD,KD)
+      REAL :: RTHETA(ID,JD,KD)
+      REAL :: BETAUP(NRS,KD)
+      REAL :: BETADWN1(NRS,KD), BETADWN2(NRS,KD)
+      INTEGER :: IF_ANGLES(NRS), IF_REDESIGN(NRS)
+      REAL :: FRACN_SPAN(KD)
+      REAL :: ANGL_UP(KD),ANGL_DWN1(KD),ANGL_DWN2(KD)
+C
+C=== BKAREA ===========================================================
+C
+      REAL :: ABX(ID,JD,KD)
+      REAL :: ABR(ID,JD,KD)
+      REAL :: AQX(ID,JD,KD)
+      REAL :: AQR(ID,JD,KD)
+      REAL :: ASX(ID,JD,KD)
+      REAL :: ASR(ID,JD,KD)
+      REAL :: ABT(JD,KD), WRABT(JD,KD)
+      REAL :: VOL(ID,JD,KD)
+      REAL :: VOLOR(ID,JD,KD)
+      REAL :: AQEXIT
+      REAL :: AQTOT(ID,JD,KD)
+      REAL :: ABTOT(ID,JD,KD)
+C
+C=== BKFLUX ===========================================================
+C
+      REAL :: XFLUX(ID,JD,KD)
+      REAL :: TFLUX(ID,JD,KD)
+      REAL :: RFLUX(ID,JD,KD)
+      REAL :: STEP(ID,JD,KD)
+      REAL :: BSTEP(ID,JD,KD)
+      REAL :: RSTEP(ID,JD,KD)
+      REAL :: SOURCE(ID,JD,KD)
+C
+C=== BKFLOW ===========================================================
+C
+      REAL :: FLOWX(ID,JD,KD)
+      REAL :: FLOWR(ID,JD,KD)
+      REAL :: FLOWT(ID,JD,KD)
+      REAL :: SPECFLOW
+C
+C=== BKSEC ============================================================
+C
+      REAL :: VX(ID,JD,KD)
+      REAL :: VR(ID,JD,KD)
+      REAL :: VT(ID,JD,KD)
+      REAL :: PEFF(ID,JD,KD)
+      REAL :: T_STATIC(ID,JD,KD)
+      REAL :: WT(ID,JD,KD)
+C
+C=== BKPRIM ===========================================================
+C
+      REAL :: RO(ID,JD,KD)
+      REAL :: P(ID,JD,KD)
+      REAL :: ROE(ID,JD,KD)
+      REAL :: ROVX(ID,JD,KD)
+      REAL :: ROVR(ID,JD,KD)
+      REAL :: ROVT(ID,JD,KD)
+      REAL :: RORVT(ID,JD,KD)
+      REAL :: HO(ID,JD,KD)
+      REAL :: ROSUB(ID,JD,KD)
+      REAL :: ROWT(ID,JD,KD)
+      REAL :: M_REL(ID,JD,KD)
+C
+C=== BKFFLO ===========================================================
+C
+      INTEGER :: IN_FLOW
+      REAL :: FLOWIN, RFLOW
+      REAL :: FLOW(JD)
+C
+C=== BKFRAC ===========================================================
+C
+      REAL :: FR(MAXKI), FP(ID), FR_IN(MAXKI)
+      REAL :: FKU(KD), FKD_VAR(KD)
+      REAL :: FU(ID), FD(ID)
+      REAL :: BSSIN(MAXKI), BSCOS(MAXKI)
+      REAL :: BRSIN(MAXKI), BRCOS(MAXKI)
+      REAL :: FMUP(JD,KD), FMDN(JD,KD)
+      REAL :: FACUP(JD), FACDWN(JD)
+      REAL :: FSPAN(KD), QSPAN(KD)
+C
+C=== BKSMTH ===========================================================
+C
+      REAL :: SFTIN,SFT,SFT1,SFTH,SFXIN,SFX,SFX1,SFXH,SFXHM1
+      REAL :: SFX14,SFX15,SFEX1,SFEXH
+      REAL :: SFXB,SFXB1,SFXBH
+      REAL :: FAC_4TH,RF,RFI,RFF,SFEXIT
+      INTEGER :: NCHANGE, NRSMTH
+      REAL :: RSMTH
+      REAL :: F1,F2,F2EFF,F3,FP_XTRAP,FRACWAVE
+C
+C=== BKLOSS ===========================================================
+C
+      REAL :: FRACPB,FRACPW,REYNO,VISLAM,REL
+      INTEGER :: ILOS,NLOS
+      REAL :: CF,REL1
+      REAL :: XFORCE(ID,JD,KD)
+      REAL :: RFORCE(ID,JD,KD)
+      REAL :: TFORCE(ID,JD,KD)
+      REAL :: QSOURCE(ID,JD,KD)
+      REAL :: VLAM(MAXKI), VTURB(MAXKI)
+      REAL :: FKLAM(NRS,MAXKI), FKTURB(NRS,MAXKI)
+      REAL :: FILAM(NRS,MAXKI), FITURB(NRS,MAXKI)
+      REAL :: FIWAKE(NRS,MAXKI), FIUP(NRS,MAXKI)
+      REAL :: FTRANS
+      INTEGER :: JTRAN_I1(MAXKI), JTRAN_IM(MAXKI)
+      INTEGER :: JTRAN_K1(MAXKI), JTRAN_KM(MAXKI)
+      REAL :: XLLIM_I1(NRS),XLLIM_IM(NRS)
+      REAL :: XLLIM_K1(NRS),XLLIM_KM(NRS)
+      REAL :: XLLIM_DWN(NRS),XLLIM_UP(NRS)
+      REAL :: CFWALL,FMIXUP,FACMIXUP
+      INTEGER :: NMIXUP
+      REAL :: YPLUSWALL
+      INTEGER :: I_ROUGH
+      REAL :: TURBVIS_LIM
+      REAL :: ROUGH_H(NRS),ROUGH_T(NRS)
+      REAL :: ROUGH_L(NRS),ROUGH_U(NRS)
+      REAL :: REYNOLDS(NRS),CHORD(NRS)
+      REAL :: ROVEXIT(NRS),VISCOSY(NRS)
+      REAL :: RF_VIS,RF_VIS1
+      REAL :: DPDS_CELL(ID,JD,KD)
+C
+C=== BKINPT ===========================================================
+C
+      REAL :: PO1(MAXKI),TO1(MAXKI),RPO1(MAXKI)
+      REAL :: BS(MAXKI),BR(MAXKI),VM1(MAXKI)
+      REAL :: PD(MAXKI),VTIN(MAXKI),PLIM(MAXKI)
+      REAL :: PDOWN_HUB,PDOWN_TIP
+      INTEGER :: IF_REPEAT,NINMOD
+      REAL :: RFINBC,THROTTLE_EXIT,PLATE_LOSS
+      REAL :: THROTTLE_PRES,THROTTLE_MAS,RFTHROTL,RFTHROTL1
+      REAL :: F_PDOWN
+C
+C=== BKMGRD ===========================================================
+C
+      INTEGER :: IR,JR,KR,IRBB,JRBB,KRBB
+      INTEGER :: JSBLK(JD)
+      REAL :: FBLK1,FBLK2,FBLK3
+      INTEGER :: IB1(MAXKI),IB2(MAXKI),KB1(MAXKI),KB2(MAXKI)
+      INTEGER :: JB1(JD),JB2(JD)
+      INTEGER :: NIB1,NIB2,NJB1,NJB2,NKB1,NKB2,NSBLK
+      REAL :: STEP1(IG1,JG1,KG1)
+      REAL :: STEP2(IG2,JG2,KG2)
+      REAL :: STEPSBK(JG3)
+      REAL :: AVG_CHG(NRS),AVG_BLK(NRS)
+C
+C=== BKGAS ============================================================
+C
+      REAL :: CP,GA,FGA,GA1,RGAS,RCP,CV,RCV,RFGA
+      REAL :: PRANDTL,FTCOND,HOREF
+      INTEGER :: IFGAS
+      REAL :: CP1,CP2,CP3,CV1,TREF,HREF
+      REAL :: HT1,HT2,HT3,HT4
+      REAL :: ET1,ET2,ET3,ET4,EREF
+      REAL :: ALPHA,R_ALPHA,BETA1,BETA2,BALPHA1,BALPHA2
+      REAL :: EPS0,EPS1,EPS2
+      REAL :: GAGAS,FGAGAS,GA1GAS
+C
+C=== BKCNTL ===========================================================
+C
+      REAL :: CFL,W,FUP,RFUP,DAMP,DAMPIN,FVMIN,CONLIM,RPM
+      REAL :: ROVM_REF,VSOUND,RO_REF,PO_REF,DP_DRO
+      REAL :: RF_PTRU,RF_PTRU1,DENSTY
+      REAL :: MACHLIM
+      REAL :: RFIN,RFIN1,RFIN2
+      REAL :: VLIMIT(NRS)
+      REAL :: RF_VSOUND,RF_VSOUND1,VS_VMAX
+      REAL :: ROLIMIT(NRS),ROLIM,RO_MIN
+      REAL :: ROELIMIT(NRS)
+      REAL :: PXTRAP(ID)
+      REAL :: REL_M_MAX
+      INTEGER :: IMACH,JMACH,KMACH
+C
+C=== BKSTAG ===========================================================
+C
+      INTEGER :: NROWS
+      INTEGER :: IND(JD),INDLE(JD),INDMIX(JD)
+      INTEGER :: NBLADE(JD)
+      REAL :: WRAD(JD),PGUESS(JD),RATPIT(JD)
+      INTEGER :: NROW(JD),INDMID(JD),NRWSM1
+      REAL :: FPOLY(NRS,MAXKI)
+      INTEGER :: INDTE(JD),JMIX(NRS),JSTART(NRS+1)
+      INTEGER :: IFMIX
+      REAL :: RFMIX,FSMTHB,FMACH
+      INTEGER :: JLED(NRS)
+      REAL :: FACXDIF(JD)
+      REAL :: ALPHA_S(ID,KD,NRS)
+      INTEGER :: NSTAGE(NRS+1),JSTG_START(NRS),JSTG_END(NRS)
+      INTEGER :: NSTAGES
+      INTEGER :: IF_CUSP(NRS),NUP_I1(NRS),NUP_IM(NRS)
+      INTEGER :: N_WAKE(NRS)
+      REAL :: SEP_THIK(NRS),SEP_DRAG(NRS)
+      REAL :: FEXTRAP,FANGLE
+      REAL :: UBLADE(JD,KD)
+C
+C=== BKTIP ============================================================
+C
+      INTEGER :: KTIPS(MAXKI),KTIPE(MAXKI)
+      REAL :: FTHICK(NRS,MAXKI)
+      REAL :: WHUB(JD),WTIP(JD)
+      INTEGER :: KS1(MAXKI),KS2(MAXKI)
+      REAL :: FRACTIP(NRS),FRACTIP1(NRS),FRACTIP2(NRS)
+C
+C=== BKDIFF ===========================================================
+C
+      REAL :: DRO(ID,JD,KD)
+      REAL :: DROE(ID,JD,KD)
+      REAL :: DROVX(ID,JD,KD)
+      REAL :: DROVR(ID,JD,KD)
+      REAL :: DRORVT(ID,JD,KD)
+C
+C=== BKDIST ===========================================================
+C
+      REAL :: FTL(ID,KD),FBL(ID,KD)
+      REAL :: FTR(ID,KD),FBR(ID,KD)
+C
+C=== BKSHROUD =========================================================
+C
+      INTEGER :: KSHROUD(NRS)
+      INTEGER :: JLEAKS(NRS),JLEAKE(NRS)
+      INTEGER :: JLKINS(NRS),JLKINE(NRS)
+      REAL :: SEALGAP(NRS)
+      INTEGER :: NSEAL(NRS)
+      REAL :: CFSHROUD(NRS),CFCASING(NRS),PITCHIN(NRS)
+      REAL :: AS(ID,JD)
+      REAL :: WCASE(NRS)
+      REAL :: POAX(ID,JD),TOAX(ID,JD)
+      REAL :: SHRDFLOW(JD)
+      REAL :: SLEAK(NRS),SWORK(NRS),SWORKTOT
+      REAL :: HOAX(ID,JD)
+C
+C=== BKSHRDFLUX =======================================================
+C
+      REAL :: SHROUDGR(ID,JD)
+      REAL :: SHROUDHO(ID,JD)
+      REAL :: SHROUDVX(ID,JD)
+      REAL :: SHROUDRVT(ID,JD)
+      REAL :: SHROUDVR(ID,JD)
+C
+C=== BKCOOL ===========================================================
+C
+      REAL :: CFLOWI1(JD,KD),CFLOWIM(JD,KD)
+      REAL :: CFLOWK1(ID,JD),CFLOWKM(ID,JD)
+      REAL :: VXCWLI1(JD,KD),VXCWLIM(JD,KD)
+      REAL :: VXCWLK1(ID,JD),VXCWLKM(ID,JD)
+      REAL :: VRCWLI1(JD,KD),VRCWLIM(JD,KD)
+      REAL :: VRCWLK1(ID,JD),VRCWLKM(ID,JD)
+      REAL :: HOCWLI1(JD,KD),HOCWLIM(JD,KD)
+      REAL :: HOCWLK1(ID,JD),HOCWLKM(ID,JD)
+      REAL :: RVTCWLI1(JD,KD),RVTCWLIM(JD,KD)
+      REAL :: RVTCWLK1(ID,JD),RVTCWLKM(ID,JD)
+      REAL :: WRAD_COOLB(NCWL),WRAD_COOLW(NCWL)
+      INTEGER :: IC(NCWL),JCBS(NCWL),JCBE(NCWL)
+      INTEGER :: KC(NCWL),KCBS(NCWL),KCBE(NCWL)
+      INTEGER :: JCWS(NCWL),JCWE(NCWL)
+      INTEGER :: ICWS(NCWL),ICWE(NCWL)
+      INTEGER :: NCOOLB,NCOOLW
+      REAL :: SUMCWL(JD)
+      REAL :: TORELB(NCWL),TORELW(NCWL)
+      REAL :: TCOOL_MIN
+      REAL :: TSTAT_EJECTB(NCWL),TSTAT_EJECTW(NCWL)
+      REAL :: PO_EJECTB(NCWL),PO_EJECTW(NCWL)
+C
+C=== BKCWL ============================================================
+C
+      REAL :: CFLOWB(NCWL),CFLOWW(NCWL)
+      REAL :: ACOOLB(NCWL),ACOOLW(NCWL)
+      REAL :: TOCOOLB(NCWL),TOCOOLW(NCWL)
+      REAL :: POCOOLB(NCWL),POCOOLW(NCWL)
+      REAL :: MACHCOOL(NCWL)
+      REAL :: XANGLEB(NCWL),SANGLEB(NCWL)
+      REAL :: SANGLEW(NCWL),TANGLEW(NCWL)
+      REAL :: RVT_IN_B(NCWL),RVT_IN_W(NCWL)
+      REAL :: WPUMP(NRS)
+C
+C=== BKATOT ===========================================================
+C
+      REAL :: ATOTK1(ID,JD),ATOTKM(ID,JD)
+      REAL :: ATOTI1(JD,KD),ATOTIM(JD,KD)
+C
+C=== BKBLEED ==========================================================
+C
+      REAL :: BLFLOWI1(JD,KD),BLFLOWIM(JD,KD)
+      REAL :: BLFLOWK1(ID,JD),BLFLOWKM(ID,JD)
+      REAL :: SUMBLEED(JD)
+C
+C=== BKOUT ============================================================
+C
+      REAL :: PO_OUT_AVG(KD),TO_OUT_AVG(KD)
+      REAL :: YAW_OUT_AVG(KD),PITCH_OUT_AVG(KD)
+      REAL :: VT_OUT_AVG(KD)
+      REAL :: TO_IN_MID,PO_IN_MID,VT_IN_MID
+      REAL :: YAW_IN_MID,PITCH_IN_MID
+C
+C=== BKNEWLOS =========================================================
+C
+      REAL :: DIST_MIN(ID,JD,KD)
+      REAL :: XLENGTH(ID,JD,KD)
+      REAL :: XLIMIT(JD)
+      REAL :: XLLIM_IN(NRS),XLLIM_LE(NRS)
+      REAL :: XLLIM_TE(NRS),XLLIM_DN(NRS)
+      REAL :: VISC_LAM(ID,JD,KD)
+      REAL :: VISC_RAT(ID,JD,KD)
+      REAL :: FST_RAT(ID,JD,KD)
+      REAL :: FSTURB(NRS)
+      REAL :: VORT_MAX
+      REAL :: Y_PLUS(ID,JD,KD)
+      REAL :: YPLAM,YPTURB
+      REAL :: YPLUS_K1(ID,JD),YPLUS_KM(ID,JD)
+      REAL :: YPLUS_I1(JD,KD),YPLUS_IM(JD,KD)
+C
+C=== BKSPALOS =========================================================
+C
+      REAL :: TRANS_KVIS(ID,JD,KD)
+      REAL :: TRANS_DYN_VIS(ID,JD,KD)
+      REAL :: DYN_VIS_ML(ID,JD,KD)
+      REAL :: TRANS_VORT(ID,JD,KD)
+      REAL :: DEL_DYNVIS(ID,JD,KD)
+      REAL :: TURB_FORCE
+      REAL :: ROAVG_CELL(ID,JD,KD)
+      REAL :: ABS_VORT(ID,JD,KD)
+      REAL :: GRAD_TVIS(ID,JD,KD)
+      REAL :: T_SOURCE(ID,JD,KD)
+      REAL :: DWALLSQ(ID,JD,KD)
+      REAL :: TVISGRADX(ID,JD,KD)
+      REAL :: TVISGRADR(ID,JD,KD)
+      REAL :: TVISGRADT(ID,JD,KD)
+      REAL :: TURBVIS_DAMP(NRS)
+      REAL :: VISC_TURB(ID,JD,KD)
+      REAL :: FAC_ST0,FAC_ST1,FAC_ST2,FAC_ST3
+      REAL :: FAC_STMIX,FAC_SFVIS,FAC_VORT,FAC_PGRAD
+      REAL :: SPAREVAR(ID,JD,KD)
+C
+C=== BKTFLOW ==========================================================
+C
+      REAL :: SFPBLD,SFPBLD1
+      INTEGER :: NSFPBLD
+      REAL :: Q3DFORCE
+      REAL :: AVGPBLADE(JD)
+      REAL :: PBLADE(JD,KD),ROVAR_M1(JD,KD)
+      REAL :: BFORCE_X(JD,KD),BFORCE_R(JD,KD)
+      REAL :: BFORCE_T(JD,KD),BFORCE_Q(JD,KD)
+      REAL :: SFACPB(JD)
+      REAL :: DEVN_ANGL(NRS,KD),EXIT_ANGL(NRS,KD)
+      REAL :: FRAC_SPAN(NRS,KD)
+      REAL :: EXANG(KD)
+      REAL :: ALPHA_CENT(JD,KD)
+      INTEGER :: NANGLES(NRS),IF_DEVN(NRS)
+      REAL :: CENT_ANGL(JD),S_DIST(JD)
+C
+C=== BKINVERSE ========================================================
+C
+      REAL :: PSPEC_I1(JD),PSPEC_IM(JD)
+      REAL :: X_IN(25),P_IN(25)
+      REAL :: SDIST(JD)
+      REAL :: YMOVE_I1(JD),YMOVE_IM(JD)
+      INTEGER :: N_UPP,J_LEDGE,J_TEDGE
+      REAL :: A2_SPEC,A2_NOW,A2_COMP,A2_SET
+      REAL :: ROT_FAK,ANG_FAK,R_FAK_I1,R_FAK_IM,S_FAK
+      REAL :: SUM_SOURCE_I1(JD),SUM_SOURCE_IM(JD)
+      INTEGER :: IFINV_I1,IFINV_IM,N_SMTH
+      REAL :: F_SMTH
+      REAL :: TKLIM(JD),ABT_MID(JD),FRAC_ABT(JD)
+      REAL :: S_MERID(JD),PDIV(JD),FAK_SCL
+      REAL :: P_AVGG(JD)
+      REAL :: SUM_MOVE_I1(JD),SUM_MOVE_IM(JD)
+      REAL :: FRAC_CRD(JD),RT_MID(JD)
+      REAL :: FSOURCE(JD)
+      REAL :: TKEXP
+      REAL :: DY_ROTN(JD)
+      REAL :: TKMOVE,TKMVM1
+      INTEGER :: IF_INV,NINV_START,NINV_END,NINV_UPP
+      REAL :: FTK
+      REAL :: TK_SURF(JD),TK_SCALE,TKORIG(JD)
+      REAL :: FRACMV,FRACMV1
+      REAL :: SURF_FLUX(JD),RF_SCALE,RF_THICK
+      REAL :: TK_ADD_LE,TK_ADD_TE,A2_COMP_NEW
+      REAL :: TKLIN(JD)
+      INTEGER :: JSET_TK
+      REAL :: TKSET(JD),TKMIN(JD),TK_DIFF(JD)
+      INTEGER :: ISUCT,IPRESS
+      REAL :: ROVMER(JD)
+C
+C=== BKTABLES =========================================================
+C
+      REAL :: RGAS_NOW(ID,JD,KD)
+      REAL :: PHEXP(ID,JD,KD)
+      REAL :: GA_PV(ID,JD,KD)
+      REAL :: WET(ID,JD,KD)
+      REAL :: H_TO_T(ID,JD,KD)
+      REAL :: ENTPY(ID,JD,KD)
+      REAL :: RSTEAM,GAMSTEAM
+      REAL :: UMAX,UMIN,ROMAX,ROMIN
+      REAL :: UINT(JD,KD)
+C
+C=== BLKTAB ===========================================================
+C
+      REAL :: P_TAB(ITB,JTB),RO_TAB(ITB,JTB)
+      REAL :: U_TAB(ITB,JTB),T_TAB(ITB,JTB)
+      REAL :: Z1(ITB,JTB)
+      REAL :: W1(ITB,101),W2(ITB,101)
+      REAL :: ENT_TAB(ITB,JTB),DRY_TAB(ITB,JTB)
+      REAL :: P_HDI_TAB(ITB,JTB),P_HDJ_TAB(ITB,JTB)
+      REAL :: T_HDI_TAB(ITB,JTB),T_HDJ_TAB(ITB,JTB)
+      REAL :: ENT_HDI_TAB(ITB,JTB),ENT_HDJ_TAB(ITB,JTB)
+      REAL :: GA_HDI_TAB(ITB,JTB),GA_HDJ_TAB(ITB,JTB)
+      REAL :: DRY_HDI_TAB(ITB,JTB),DRY_HDJ_TAB(ITB,JTB)
+      REAL :: HPPOLY(ITB,JTB),GA_PV_TAB(ITB,JTB)
+      INTEGER :: ITAB,JTAB,I_MID,J_MID
+      REAL :: HO_INN(KD),ROSTAG_IN(KD)
+      REAL :: XVAL(ITB,JTB),YVAL(ITB,JTB)
+      REAL :: ROAXIS(ITB),UAXIS(JTB)
+      REAL :: HEIGHTS(JTB)
+      REAL :: DROAXIS(ITB),DUAXIS(JTB)
+      REAL :: ROMINN,ROMAXX,UMINN,UMAXX
+C
+C=== BKCHAR ===========================================================
+C
+      CHARACTER*72 :: TITLE, ROWTYP, DUMMY_INPUT, DUMMY
+      CHARACTER*1  :: ANGL_TYP(NRS)
+C
+C=== Explicit type overrides (M-prefix declared REAL) ==================
+C     MACHLIM in BKCNTL, MACHCOOL in BKCWL, M_REL in BKPRIM
+      REAL :: MACHREL
+C
+C======================================================================
+      CONTAINS
+C======================================================================
+C
+      SUBROUTINE PRE_READIN_DIMS(ANS_IN,
+     &                           IM_REQ,JM_REQ,KM_REQ,NROWS_REQ)
+C
+C     Lightweight pre-read for NEW format only.
+C     Reads stable marker lines to determine IM,KM,NROWS.
+C     JM is estimated from numeric row-control lines (3 integers).
+C     If estimation fails, JM falls back to JD.
+C
+      CHARACTER*1 ANS_IN
+      INTEGER IM_REQ,JM_REQ,KM_REQ,NROWS_REQ
+      CHARACTER*256 LINE
+      INTEGER IOS, IOS2, IOS3, IOS4
+      INTEGER I1, I2, I3, I4
+      INTEGER JM_SUM, N_JMROW
+      LOGICAL FOUND_NROWS, FOUND_IMKM
+      LOGICAL FOUND_JM
+
+      IF(ANS_IN.NE.'N'.AND.ANS_IN.NE.'n') THEN
+           WRITE(6,*) ' PRE_READIN_DIMS: only NEW format supported.'
+           STOP
+      END IF
+      REWIND(5)
+      FOUND_NROWS = .FALSE.
+      FOUND_IMKM  = .FALSE.
+      FOUND_JM    = .FALSE.
+      JM_SUM      = 0
+      N_JMROW     = 0
+
+ 1000 CONTINUE
+      READ(5,'(A)',IOSTAT=IOS) LINE
+      IF(IOS.NE.0) GO TO 2000
+
+      IF((.NOT.FOUND_NROWS).AND.
+     &   INDEX(LINE,'NUMBER OF BLADE ROWS').GT.0) THEN
+           READ(5,'(A)',IOSTAT=IOS) LINE
+           IF(IOS.NE.0) GO TO 9000
+           READ(LINE,*,IOSTAT=IOS2) NROWS_REQ
+           IF(IOS2.NE.0) GO TO 9000
+           FOUND_NROWS = .TRUE.
+           GO TO 1000
+      END IF
+
+      IF((.NOT.FOUND_IMKM).AND.
+     &   INDEX(LINE,'GRID POINT NUMBERS').GT.0) THEN
+           READ(5,'(A)',IOSTAT=IOS) LINE
+           IF(IOS.NE.0) GO TO 9000
+           READ(LINE,*,IOSTAT=IOS2) IM_REQ,KM_REQ
+           IF(IOS2.NE.0) GO TO 9000
+           FOUND_IMKM = .TRUE.
+           GO TO 1000
+      END IF
+
+      IF(FOUND_NROWS.AND.FOUND_IMKM.AND.(.NOT.FOUND_JM)) THEN
+           IF(INDEX(LINE,'.').EQ.0) THEN
+                READ(LINE,*,IOSTAT=IOS4) I1,I2,I3,I4
+                IF(IOS4.NE.0) THEN
+                     READ(LINE,*,IOSTAT=IOS3) I1,I2,I3
+                     IF(IOS3.EQ.0) THEN
+                          IF(I1.GE.2.AND.I1.LE.JD.AND.
+     &                       I2.GE.1.AND.I2.LE.I1.AND.
+     &                       I3.GE.1.AND.I3.LE.I1) THEN
+                               JM_SUM  = JM_SUM + I1
+                               N_JMROW = N_JMROW + 1
+                               IF(N_JMROW.EQ.NROWS_REQ)
+     &                              FOUND_JM = .TRUE.
+                          END IF
+                     END IF
+                END IF
+           END IF
+      END IF
+
+      GO TO 1000
+
+ 2000 CONTINUE
+      IF((.NOT.FOUND_NROWS).OR.(.NOT.FOUND_IMKM)) GO TO 9000
+
+      IF(FOUND_JM) THEN
+           JM_REQ = JM_SUM
+      ELSE
+           JM_REQ = JD
+      END IF
+
+      REWIND(5)
+      RETURN
+
+ 9000 CONTINUE
+      WRITE(6,*) ' PRE_READIN_DIMS: input pre-read failed.'
+      STOP
+      END SUBROUTINE PRE_READIN_DIMS
+C
+C----------------------------------------------------------------------
+C
+      SUBROUTINE ALLOC_MULTALL_DATA(IM_REQ,JM_REQ,KM_REQ,
+     &                              NROWS_REQ)
+      INTEGER IM_REQ,JM_REQ,KM_REQ,NROWS_REQ
+      IM_ALLOC    = IM_REQ
+      JM_ALLOC    = JM_REQ
+      KM_ALLOC    = KM_REQ
+      NROWS_ALLOC = NROWS_REQ
+      IALLOC_STATE = 1
+      WRITE(6,*) ' PRE-READ DIMS: IM,JM,KM,NROWS = ',
+     &            IM_ALLOC,JM_ALLOC,KM_ALLOC,NROWS_ALLOC
+      RETURN
+      END SUBROUTINE ALLOC_MULTALL_DATA
+C
+C----------------------------------------------------------------------
+C
+      SUBROUTINE DEALLOC_MULTALL_DATA
+      IALLOC_STATE = 0
+      RETURN
+      END SUBROUTINE DEALLOC_MULTALL_DATA
+C
+      END MODULE MULTALL_DATA
