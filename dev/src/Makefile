@@ -1,5 +1,6 @@
 FC = gfortran
 SRC = multall-open21.3-s1.0.f
+MODULE_SRC = multall_data.f
 BIN = ../bin/multall-open21.3-s
 SRC_ORIG = multall-open-21.3.f
 BIN_ORIG = ../bin/multall-open21.3-original
@@ -31,8 +32,8 @@ build_original: $(BIN_ORIG)
 
 build_timer: $(BIN_TIMER)
 
-$(BIN): $(SRC)
-	$(FC) $(FFLAGS) $(VECFLAGS) -o $@ $<
+$(BIN): $(SRC) $(MODULE_SRC)
+	$(FC) $(FFLAGS) $(VECFLAGS) -o $@ $(MODULE_SRC) $<
 
 $(BIN_ORIG): $(SRC_ORIG)
 	$(FC) $(FFLAGS_ORIG) $(VECFLAGS) -o $@ $<
@@ -45,8 +46,8 @@ clean:
 
 build_ifx: $(BIN_IFX)
 
-$(BIN_IFX): $(SRC)
-	$(FC_IFX) $(FFLAGS_IFX) $(VECFLAGS_IFX) -o $@ $<
+$(BIN_IFX): $(SRC) $(MODULE_SRC)
+	$(FC_IFX) $(FFLAGS_IFX) $(VECFLAGS_IFX) -o $@ $(MODULE_SRC) $<
 
 run_omp2: $(BIN)
 	cd $(RUN_DIR) && $(OMP_ENV) ../bin/$(notdir $(BIN)) < $(INPUT) > $(OUT_OMP2)

@@ -86,7 +86,9 @@ C        THIS IS THE MAIN PROGRAM WHICH IS JUST USED TO CALL THE
 C                            SUBROUTINES.
 C   
 C
+      USE MULTALL_DATA
       CHARACTER*1 ANS_IN
+      INTEGER IM_NEED,JM_NEED,KM_NEED,NROWS_NEED
       INTEGER T_MAIN_NEW, T_MAIN_OLD, T_MAIN_SETUP, T_MAIN_TOTAL
       PARAMETER (T_MAIN_NEW=1, T_MAIN_OLD=2, T_MAIN_SETUP=3,
      & T_MAIN_TOTAL=41)
@@ -125,6 +127,10 @@ C
 C
       IF(ANS_IN.EQ.'N'.OR.ANS_IN.EQ.'n') THEN
              WRITE(6,*) ' NEW_READIN DATA FORMAT SPECIFIED.'
+                    CALL PRE_READIN_DIMS(ANS_IN,IM_NEED,JM_NEED,
+     &                                 KM_NEED,NROWS_NEED)
+                    CALL ALLOC_MULTALL_DATA(IM_NEED,JM_NEED,
+     &                                    KM_NEED,NROWS_NEED)
                   CALL TIMER_START(T_MAIN_NEW)
                   CALL NEW_READIN(ANS_IN)
                   CALL TIMER_STOP(T_MAIN_NEW)
@@ -132,6 +138,7 @@ C
 C
       IF(ANS_IN.EQ.'O'.OR.ANS_IN.EQ.'o')THEN
              WRITE(6,*)' OLD_READIN DATA FORMAT SPECIFIED.'
+                  CALL ALLOC_MULTALL_DATA(128,1000,82,0)
                   CALL TIMER_START(T_MAIN_OLD)
                   CALL OLD_READIN(ANS_IN)
                   CALL TIMER_STOP(T_MAIN_OLD)
@@ -168,14 +175,13 @@ C       THIS SUBROUTINE READS IN THE DATA IN
 C       ====================
 
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
-      COMMON/BKODDS/
-     &           XINT(JD),YINT(JD),RINT(JD),
-     &           ICUSP(NRS),LCUSP(NRS),LCUSPUP(NRS),
-     &           FRACNEW(JD),BETANEW(JD),SLOPE(JD),
-     &           THICKUP(JD),THICKLOW(JD),
-     &           XINT1(KD),XINT2(KD),XINT3(KD),XINT4(KD)
+      DIMENSION XINT(JD),YINT(JD),RINT(JD)
+      INTEGER ICUSP(NRS),LCUSP(NRS),LCUSPUP(NRS)
+      DIMENSION FRACNEW(JD),BETANEW(JD),SLOPE(JD)
+      DIMENSION THICKUP(JD),THICKLOW(JD)
+      DIMENSION XINT1(KD),XINT2(KD),XINT3(KD),XINT4(KD)
 C
       DIMENSION XHUB(JD),RHUB(JD),XTIP(JD),RTIP(JD),XQO(MAXKI),
      &          RQO(MAXKI),XNEWHUB(JD),RNEWHUB(JD),XNEWTIP(JD),
@@ -2272,14 +2278,13 @@ C       THIS SUBROUTINE READS IN THE DATA IN
 C       ====================
 
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
-      COMMON/BKODDS/
-     &           XINT(JD),YINT(JD),RINT(JD),
-     &           ICUSP(NRS),LCUSP(NRS),LCUSPUP(NRS),
-     &           FRACNEW(JD),BETANEW(JD),SLOPE(JD),
-     &           THICKUP(JD),THICKLOW(JD),
-     &           XINT1(KD),XINT2(KD),XINT3(KD),XINT4(KD)
+      DIMENSION XINT(JD),YINT(JD),RINT(JD)
+      INTEGER ICUSP(NRS),LCUSP(NRS),LCUSPUP(NRS)
+      DIMENSION FRACNEW(JD),BETANEW(JD),SLOPE(JD)
+      DIMENSION THICKUP(JD),THICKLOW(JD)
+      DIMENSION XINT1(KD),XINT2(KD),XINT3(KD),XINT4(KD)
 C
       CHARACTER*1 ANS_IN
 C
@@ -3777,10 +3782,11 @@ C      THIS IS THE MAIN TIME STEPPING LOOP. IT IS EXECUTED MANY HUNDREDS OF
 C      TIMES AND USES MOST OF THE CPU TIME. ITS MAIN SUBROUTINE IS 'TSTEP'
 C      WHICH ALSO USES MUCH OF THE TIME.
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
-      DIMENSION CHECK_FLOW(JD),BLADE_FLOW(JD),ROVMSQ(KD),ANG_INC(KD),
+      DIMENSION ROVMSQ(KD),ANG_INC(KD),
      &          P_PSURF(JD),P_SSURF(JD),SFRAC(JD)
+      REAL, ALLOCATABLE, SAVE :: CHECK_FLOW(:), BLADE_FLOW(:)
       REAL T_REL_M_MAX
       INTEGER T_IMACH, T_JMACH, T_KMACH
       REAL T_EMAX
@@ -3865,7 +3871,13 @@ C
 
       DOUBLE PRECISION START, FINI, RUNTIME, POINTIME
 C
-      SAVE START,FINI,CHECK_FLOW,BLADE_FLOW
+      SAVE START,FINI
+C
+C     Allocate SAVE'd arrays on first call
+      IF(.NOT.ALLOCATED(CHECK_FLOW)) THEN
+          ALLOCATE(CHECK_FLOW(JD))
+          ALLOCATE(BLADE_FLOW(JD))
+      END IF
 
       CALL TIMER_START(T_LOOP_TOTAL)
 C
@@ -6812,7 +6824,7 @@ C       AND ALSO PERFORMS THE PITCHWISE SMOOTHING
 C       MOST OF THE COMPUTATIONAL TIME IS USED BY THIS SUBROUTINE
 C
 C       ====================
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION D(ID,JD,KD), DIFF(ID,JD,KD),AVG(KD),
      &          B1CHG(IG1,JG1,KG1),B2CHG(IG2,JG2,KG2),SBCHG(JD)
@@ -7590,7 +7602,7 @@ C
 C       THIS ROUTINE CALCULATES FLOW PROPERTIES AND PRINTS HEADINGS
 C       BEFORE CALLING PRINT TO OUTPUT THE RESULT ARRAYS
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C******************************************************************************
 C******************************************************************************
@@ -7936,7 +7948,7 @@ C       ====================
 C       THIS ROUTINE PRINT'S OUT 3-D ARRAYS OR PITCHWISE AVERAGE VALUES.
 C       ====================
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C
       DIMENSION F(ID,JD,KD),SUMFUN(MAXKI)
@@ -8004,7 +8016,7 @@ C
 C**********THIS SUBROUTINE SETS UP THE GRID AND INITIALISES ALL THE
 C          VARIABLES USED IN THE MAIN PROGRAM.
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION JSTART1(JD),JEND1(JD),JSTART2(JD),JEND2(JD),PDOWN(KD)
 C
@@ -9414,7 +9426,7 @@ C       THE GRID IS ADJUSTED TO ALLOW FOR THE TIP GAP AND NUMBER OF POINTRS IN T
 C
 C       ====================
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION   XINT(MAXKI),YINT(MAXKI),RTUP_INT(MAXKI),
      &            RTTK_INT(MAXKI),FRMOD(MAXKI),QODIST(MAXKI)
@@ -9534,7 +9546,7 @@ C       RT_THICK, X  AND R FOR THE REQUIRED CROSS-SECTIONS
 C
 C       ====================
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION   XINT(MAXKI),YINT(MAXKI),RTUP_INT(MAXKI),
      &            RTTK_INT(MAXKI),FRMOD(MAXKI),QODIST(MAXKI)
@@ -9790,7 +9802,7 @@ C
 C
 C   THIS SUBROUTINE MASS AVERAGES SOME FLOW QUANTITIES AT EVERY  "J"  STATION.
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION BLADE_FLOW(JD),SUM_ENTPY(JD),SUMPO(JD),SUMTO(JD),
      &          SUMRVT(JD),SUMTSTAT(JD),SUMPSTAT(JD),SUMHO(JD),
@@ -9843,7 +9855,7 @@ C
 C          THIS SUBROUTINE CHANGES THE TIMESTEP IN PROPORTION TO THE LOCAL
 C          MACH NUMBER. THE CHANGES ARE RELAXED BY THE FACTOR  "RELAX" .
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C
       TLIM   = 0.1*TO1(KMID)
@@ -9988,7 +10000,7 @@ C      OR TOWARDS THE AVERAGE VALUE IF IN_FLOW=2.
 C      IT DOES THIS BY MEANS OF A BODY FORCE WHICH GENERATES LOSS IF IN_FLOW=3
 C      BUT IN_FLOW =2 SHOULD GIVE IMPROVED CONVERGENCE WITH NO LOSS GENERATION.
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DO 100 J=1,JM
       FLOW(J)=0.0
@@ -10050,7 +10062,7 @@ C            SOLVED INSTEADY OF ASSUMING THAT THEY CANCEL AS IN EARLIER VERSIONS
 C            ALL SOLID SURFACES ARE ASSUMED TO BE ADIABATIC - NO HEAT FLUX.
 C
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C
       DIMENSION VXAVG(MAXKI),VRAVG(MAXKI),WTAVG(MAXKI),WABS(MAXKI),
@@ -11112,7 +11124,7 @@ C******************************************************************************
 C
       SUBROUTINE INPINT
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION  SUMFN(MAXKI),SUMF_IN(MAXKI),ANS(MAXKI)
 C
@@ -11271,7 +11283,7 @@ C     DOWN TO THE MIXING PLANE OR DOWNSTREAM BOUNDARY.
 C     IT ALSO FITS A CUSP AT THE TRAILING EDGE AND SETS THE GRID ANGLES
 C     DOWNSTREAM OF THE TRAILING EDGE
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION  SDIS_T(JD),XINT(JD),RINT(JD),SNEW(JD),ANSX(JD),
      &           ANSR(JD),TH_UPP(JD),TH_THICK(JD),TH_MID(JD)
@@ -11498,7 +11510,7 @@ C
       SUBROUTINE GRID_UP(K,J1,J2,S1,S2,NGAP,SDIS_T,XINT,RINT,NEXTRAP,
      &                 BETA_UP,IFANGLES)
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C     THIS SUBROUTINE SETS THE GRID UPSTREAM OF THE LEADING EDGE,
 C     UP TO THE MIXING PLANE OR UPSTREAM BOUNDARY.
@@ -11613,7 +11625,7 @@ C
       SUBROUTINE NEWGRID(JMROW,J1,J2,JLEROW,JTEROW,JROTHS,JROTHE,
      & JROTTS,JROTTE)
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C
       DIMENSION UPF(JD),ONF(JD),DOWNF(JD),SOLD(JD),SNEW(JD),
@@ -11978,7 +11990,7 @@ C******************************************************************************
 C
       SUBROUTINE SHROUDFLOW
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C
 C     READ IN DATA FOR THE SHROUD LEAKAGE MODEL IF KTIPS(NR) < 1 .
@@ -12307,7 +12319,7 @@ C******************************************************************************
 C
       SUBROUTINE SHROUDFLUX(SFLUX)
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C
       DIMENSION SFLUX(ID,JD)
@@ -12340,7 +12352,7 @@ C  THIS SUBROUTINE SETS UP FIXED COOLING FLOWS WHICH ARE ONLY SET ONCE AND NOT
 C  CHANGED DURING THE ITERATIONS. THE MACH MUMBER OF THE EJECTED FLOW IS SPECIFIED
 C  AND THE STAGNATION PRESSURE OF THE COOLANT IS ONLY USED TO CALCULATE THE EFFICIENCY.
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
       WRITE(6,*) ' ENTERED COOLIN_1'
 C
@@ -12668,7 +12680,7 @@ C
       SUBROUTINE BLEEDOUT(IBLEED,KBLEED)
 C
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C
       DIMENSION 
@@ -12804,7 +12816,7 @@ C
 C     THIS SUBROUTINE CALCULATES THE MASS AVERAGED QUANTITIES AND MACHINE
 C     EFFICIENCY AND WRITES THEM OUT TO UNIT 6.
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C
       DIMENSION BLADE_FLOW(JD),SUM_ENTPY(JD),SUMPO(JD),SUMTO(JD),
@@ -13947,7 +13959,7 @@ C*******************************************************************************
 C
       SUBROUTINE SMOOTH(N1,N2,NSMOOTH,FSMOOTH,FRAC,VAR)
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C 
       DIMENSION FRAC(JD),VAR(JD),TEMP(JD)
 C
@@ -13974,7 +13986,7 @@ C
 C
 C      THIS SUBROUTINE SETS COEFFICIENTS NEEDED FOR THE NON-PERFECT GAS PROPERTY FUNCTIONS    
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
       HREF = CP1*TREF
       CV1  = CP1 - RGAS
@@ -14161,7 +14173,7 @@ C     FOR RADIAL FLOW MACHINES.
 C
 C     IT IS NOT USED IN  VERSION 16.3  AND ABOVE. USE SUBROUTINE "RESTAGGER" INSTEAD .
 C************************************************************************************
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION  XIN(JD),YUP(JD),YLOW(JD),YMID(JD),
      &           XUP(JD),XMID(JD),XLOW(JD)
@@ -14250,7 +14262,7 @@ C******************************************************************************
 C
       SUBROUTINE LEAN(K,J1,J2,ANGLEAN)
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C******************************************************************************
 C******************************************************************************
 C     LEAN THE BLADE BY ANGLEAN IF IF_LEAN IS GREATER THAN ZERO.
@@ -14298,7 +14310,7 @@ C***********************************************************************
 C     WRITE THE MASS AVERAGE VALUES AT EXIT TO A FILE 'outbconds'
 C***********************************************************************
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION FAVG(KD)
 C
@@ -14473,7 +14485,7 @@ C******************************************************************************
 C
       SUBROUTINE NEWBCONDS 
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C     THIS SUBROUTINE CHANGES THE INLET BOUNDARY CONDITIONS TO SIMULATE A REPEATING STAGE
 C
@@ -14506,7 +14518,7 @@ C*****************************************************************************
 C
       SUBROUTINE CELL_TO_NODE(VCELL,VNODE)
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION  VCELL(ID,JD,KD), VNODE(ID,JD,KD) 
 C    
@@ -14588,7 +14600,7 @@ C    THIS SUBROUTINE CALCULATES THE DISTANCE FROM EVERY GRID POINT TO THE NEARES
 C    SOLID WALL AND USES THIS TO SET THE MIXING LENGTH.
 C********************************************************************************
 C********************************************************************************
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C     Pre-computed endwall distance for each (J,K) pair
       REAL ENDWALL_PRE(JD,KD)
@@ -14952,13 +14964,7 @@ C
 C            NEW MODEL BASED ON TBLOCK MODEL. JANUARY 2010.
 C
 C
-      INCLUDE  'commall-open-21.3'
-C
-      COMMON/BKSTRESS/  TXX(ID,JD,KD),TXR(ID,JD,KD),
-     &                  TXT(ID,JD,KD),TRX(ID,JD,KD),TRR(ID,JD,KD),
-     &                  TRT(ID,JD,KD),TTX(ID,JD,KD),TTR(ID,JD,KD),
-     &                  TTT(ID,JD,KD),QXX(ID,JD,KD),QRR(ID,JD,KD),
-     &                  QTT(ID,JD,KD)
+      USE MULTALL_DATA
 C
       DIMENSION  FORCEX(ID,JD,KD),FORCER(ID,JD,KD),FORCET(ID,JD,KD),
      &           ESOURCE(ID,JD,KD),TEMPP(JD)
@@ -15900,7 +15906,7 @@ C     AT THE MIDDLE OF THE FACE  AN EXTRA  "V/R"  TERM MUST BE SUBTRACTED FROM T
 C     RADIAL DERIVATIVE.
 C******************************************************************************************
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION  V(ID,JD,KD)
 C
@@ -15950,7 +15956,7 @@ C     RADIAL DERIVATIVE.
 C******************************************************************************************
 C******************************************************************************************
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION  V(ID,JD,KD)
 C
@@ -16014,13 +16020,7 @@ C     THIS SUBROUTINE COMPUTES A VISCOUS BODY FORCE BASED ON WALL FUNCTIONS FOR 
 C     SURFACE SHEAR STRESS AND THE SPALART - ALLMARAS TURBULENCE MODEL.          
 C******************************************************************************************
 C
-      INCLUDE  'commall-open-21.3'
-C
-      COMMON/BKSTRESS/  TXX(ID,JD,KD),TXR(ID,JD,KD),
-     &                  TXT(ID,JD,KD),TRX(ID,JD,KD),TRR(ID,JD,KD),
-     &                  TRT(ID,JD,KD),TTX(ID,JD,KD),TTR(ID,JD,KD),
-     &                  TTT(ID,JD,KD),QXX(ID,JD,KD),QRR(ID,JD,KD),
-     &                  QTT(ID,JD,KD)
+      USE MULTALL_DATA
 C
       DIMENSION  FORCEX(ID,JD,KD),FORCER(ID,JD,KD),FORCET(ID,JD,KD),
      &           ESOURCE(ID,JD,KD)
@@ -17268,7 +17268,7 @@ C     VARIABLE VAR(I,J,K). A ZERO GRADIENT CONDITION IS APPLIED AT THE BOUNDARIE
 C     WITH NO SMOOTHING ACROSS THE MIXING PLANE.
 C******************************************************************************************
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION TEMPVAR(JD),VAR(ID,JD,KD)
 C
@@ -17357,7 +17357,7 @@ C     UNIFORM ISENTROPIC VALUES.AND ALSO ALLOWS THE FLOW ANGLES TO BE EXTRAPOLAT
 C     THE FLOW CAN CROSS THE MIXING PLANE IN EITHER DIRECTION.
 C******************************************************************************************
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION  ALPHAA(ID),GAMA(ID),WREF_JP2(ID),ROREF_JP2(ID),
      &           HSTAT(ID),PISENT(ID),ROISENT(ID),
@@ -17816,7 +17816,7 @@ C*******************************************************************************
 C  
       SUBROUTINE SMOOTH_VAR(D)   
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C     Thread-private local arrays (orphaned worksharing: each thread
 C     gets its own stack copy when called from within PARALLEL region)
@@ -18181,7 +18181,7 @@ C******************************************************************************
 C
       SUBROUTINE RE_DESIGN(NR,K,J1,J2,JLEROW,JTEROW) 
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION  SMER(JD),FRACNEW(JD),BETANEW(JD),
      &           SLOPE(JD),THICKUP(JD),THICKLOW(JD),TKUP(JD),TKLOW(JD),
@@ -18405,7 +18405,7 @@ C*****************************************************************************
 C
 C  THIS SUBROUTINR MODIFIED TO ALLOW FOR MULTIPLE BLADE ROWS. AUGUST 2018.
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION FRACSS(20),TKSS(20),TK_SS(JD),SDIS_T(JD)
       SAVE      SRANGE1,TKSS_LAST
@@ -18504,7 +18504,7 @@ C     THIS SUBROUTINE RESTAGGERS A BLADE SECTION.
 C     THE ROTATION IS APPLIED ON A STREAM SURFACE SO THAT IT IS APPLICABLE
 C     TO BOTH RADIAL FLOW AND AXIAL FLOW MACHINES.
 C************************************************************************************
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION  SDIS_T(JD),THET_A(JD),SLOPE(JD)
 C
@@ -18590,7 +18590,7 @@ C*******************************************************************************
 C
 C   THIS SUBROUTINE APPLIES THE WALL FUNCTIONS PROPOSED BY Shih et al. NASA/TM-1999-209398 
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C    DO NOT USE THE PRESSURE GRADIENT TERM UNLESS YPLUSWALL IS LESS THAN -10.
       IF(YPLUSWALL.GT.-10.0) GO TO 100
@@ -18662,7 +18662,7 @@ C
 C    THIS SUBROUTINE EVALUATRES THE PRESSURE GRADIENTS ON THW WALLS FOR USE WITH
 C    THE Shih et al WALL FUNCTIONS
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION  TEMPP(JD)
 C
@@ -18728,7 +18728,7 @@ C
 C
 C  THIS SUBROUTINE READS IN THE DATA FORANY COOLING FLOWS.
 C
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
   99  FORMAT(A72)
 C
@@ -18922,7 +18922,7 @@ C  AND PRESSURE AND THE LOCAL STATIC PRESSURE AT THE POINT OF EJECTION. THE COOL
 C  THEREFORE CHANGE DURING CONVERGENCE AND MUST BE RESET EVERY FEW ITERATIONS. THE COOLANT
 C  EJECTION MACH NUMBER IS INPUT BUT NOT USED.
 
-      INCLUDE  'commall-open-21.3'
+      USE MULTALL_DATA
 C
       DIMENSION HO_ABS(JD,MAXKI),VNIN(JD,MAXKI),VSIN(JD,MAXKI),
      &          CELL_FLOW(JD,MAXKI)
@@ -19295,7 +19295,7 @@ C**********************************************************************
 C**********************************************************************
       SUBROUTINE GEOM_MOD
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C******************************************************************************
 C******************************************************************************
 C
@@ -19930,7 +19930,7 @@ C**********************************************************************
 
       SUBROUTINE READ_TABLE
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
       REAL V00,V10,V01,V11
 C
       OPEN(UNIT = 9, FILE= 'props_table.dat')
@@ -20414,7 +20414,7 @@ C
       SUBROUTINE TABSEARCH(RHOIN,UIN,PFOUND,TFOUND,ENTFOUND,GAFOUND,
      &           DRYFOUND)
 C
-      INCLUDE 'commall-open-21.3'
+      USE MULTALL_DATA
 C
 C     THREAD-LOCAL HINT: previous search result for fast path
       INTEGER IHINT, JHINT, IHINT_OK
