@@ -2,12 +2,12 @@
 # =============================================================
 # 1000ステップ ベンチマーク実行スクリプト
 # AWS c7i (8コア) 用
-# 実行場所: ~/MULTALL-project/dev/test_cases/
+# 実行場所: ~/MULTALL-project/dev/test_cases/two-stg-LP-ST+steam/
 # =============================================================
 
 set -e
 
-TESTDIR=~/MULTALL-project/dev/test_cases
+TESTDIR=~/MULTALL-project/dev/test_cases/two-stg-LP-ST+steam
 BINDIR=~/MULTALL-project/dev/bin
 INPUT=two-stg-LP-ST+steam-1000stp.dat
 TIMESTAMP=$(date +%Y%m%d_%H%M)

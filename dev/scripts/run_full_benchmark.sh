@@ -11,7 +11,7 @@ echo "=========================================="
 echo "  PART 1: two-stg (10000stp, ~7000 converge)"
 echo "  Started: $(date)"
 echo "=========================================="
-cd ~/MULTALL-project/dev/test_cases
+cd ~/MULTALL-project/dev/test_cases/two-stg-LP-ST+steam
 
 echo "--- original ---"
 script -qc "echo Y | $BINDIR/multall-open21.3-original < two-stg-LP-ST+steam-10000stp.dat" run_${TS}_twostg_original.out > /dev/null 2>&1 || true
@@ -30,7 +30,7 @@ echo "=========================================="
 echo "  PART 2: HP Steam (9000stp, ~5700 converge)"
 echo "  Started: $(date)"
 echo "=========================================="
-cd ~/MULTALL-project/dev/test_cases_hp_steam
+cd ~/MULTALL-project/dev/test_cases/hp_steam
 
 echo "--- original ---"
 script -qc "echo Y | $BINDIR/multall-open21.3-original < hp-steam-turb.dat" run_${TS}_hp_original.out > /dev/null 2>&1 || true
@@ -49,12 +49,12 @@ echo "=========================================="
 echo "  SUMMARY: LOOP: TOTAL"
 echo "=========================================="
 echo "--- two-stg ---"
-for f in ~/MULTALL-project/dev/test_cases/stage.log.${TS}_twostg_*; do
+for f in ~/MULTALL-project/dev/test_cases/two-stg-LP-ST+steam/stage.log.${TS}_twostg_*; do
   echo -n "$(basename $f): "
   grep '^\s*4\s' $f
 done
 echo "--- HP Steam ---"
-for f in ~/MULTALL-project/dev/test_cases_hp_steam/stage.log.${TS}_hp_*; do
+for f in ~/MULTALL-project/dev/test_cases/hp_steam/stage.log.${TS}_hp_*; do
   echo -n "$(basename $f): "
   grep '^\s*4\s' $f
 done

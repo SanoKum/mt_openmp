@@ -2,12 +2,12 @@
 # =============================================================
 # 5000ステップ ベンチマーク実行スクリプト
 # AWS c7i (8コア) 用
-# 実行場所: ~/MULTALL-project/dev/test_cases_5000stp/
+# 実行場所: ~/MULTALL-project/dev/test_cases/two-stg-LP-ST+steam/
 # =============================================================
 
 set -e
 
-TESTDIR=~/MULTALL-project/dev/test_cases_5000stp
+TESTDIR=~/MULTALL-project/dev/test_cases/two-stg-LP-ST+steam
 BINDIR=~/MULTALL-project/dev/bin
 INPUT=two-stg-LP-ST+steam.dat
 OMP_COMMON="OMP_PROC_BIND=true OMP_PLACES=cores OMP_WAIT_POLICY=PASSIVE"

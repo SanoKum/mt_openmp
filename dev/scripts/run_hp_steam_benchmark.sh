@@ -2,13 +2,13 @@
 # =============================================================
 # HP Steam Turbine ベンチマーク実行スクリプト
 # AWS c7i (8コア) 用
-# 実行場所: ~/MULTALL-project/dev/test_cases_hp_steam/
+# 実行場所: ~/MULTALL-project/dev/test_cases/hp_steam/
 # 入力: hp-steam-turb.dat (~5686 steps to convergence)
 # =============================================================
 
 set -e
 
-TESTDIR=~/MULTALL-project/dev/test_cases_hp_steam
+TESTDIR=~/MULTALL-project/dev/test_cases/hp_steam
 BINDIR=~/MULTALL-project/dev/bin
 INPUT=hp-steam-turb.dat
 TIMESTAMP=$(date +%Y%m%d_%H%M)

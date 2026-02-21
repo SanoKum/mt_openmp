@@ -1,18 +1,23 @@
 #!/bin/bash
 # =============================================================
 # 100ステップ ベンチマーク実行スクリプト
-# AWS c7i (8コア) 用
-# 実行場所: ~/MULTALL-project/dev/test_cases/
+# AWS c7i (8コア) / ローカル 両対応
+# 実行場所: ~/MULTALL-project/dev/
+# テストケース:
+#   1. two-stg-LP-ST+steam (100stp) — IM=64, 2段タービン
+#   2. steamtest+steam               — 小規模メッシュ
 # =============================================================
 
 set -e
 
-TESTDIR=~/MULTALL-project/dev/test_cases
-BINDIR=~/MULTALL-project/dev/bin
-INPUT=two-stg-LP-ST+steam.dat
+BASEDIR=~/MULTALL-project/dev
+BINDIR=$BASEDIR/bin
+SCRIPTSDIR=$BASEDIR/scripts
 TIMESTAMP=$(date +%Y%m%d_%H%M)
 
-cd "$TESTDIR"
+export OMP_PROC_BIND=true
+export OMP_PLACES=cores
+export OMP_WAIT_POLICY=PASSIVE
 
 echo "========================================="
 echo " 100-step Benchmark on $(hostname)"
@@ -21,77 +26,149 @@ echo " CPU: $(lscpu | grep 'Model name' | sed 's/.*: *//')"
 echo " Cores: $(nproc)"
 echo "========================================="
 
-# --- Original (non-OpenMP) ---
-# Note: original binary opens /dev/tty for Y/N prompt.
-# Use 'script' to provide a pseudo-tty in non-interactive SSH.
-if [ -f "$BINDIR/multall-open21.3-original" ]; then
+# =============================================================
+# PART 1: two-stg-LP-ST+steam (100ステップ)
+# =============================================================
+TESTDIR=$BASEDIR/test_cases/two-stg-LP-ST+steam_100stp
+INPUT=two-stg-LP-ST+steam.dat
+
 echo ""
-echo "[1/6] Running ORIGINAL (no OpenMP)..."
-time script -qc "echo Y | $BINDIR/multall-open21.3-original < $INPUT" run_original.out > /dev/null 2>&1 || true
-if [ -f stage.log ]; then
-  cp stage.log stage.log.aws_original_${TIMESTAMP}
+echo "========================================="
+echo " PART 1: two-stg-LP-ST+steam (100stp)"
+echo "========================================="
+cd "$TESTDIR"
+
+# --- Original (non-OpenMP) ---
+if [ -f "$BINDIR/multall-open21.3-original" ]; then
+  echo ""
+  echo "[1a] Running ORIGINAL (no OpenMP) - two-stg..."
+  time script -qc "echo Y | $BINDIR/multall-open21.3-original < $INPUT" run_original_${TIMESTAMP}.out > /dev/null 2>&1 || true
+  if [ -f stage.log ]; then
+    cp stage.log stage.log.aws_original_${TIMESTAMP}
+    echo "  -> Done."
+  else
+    echo "  -> WARNING: stage.log not generated. Run original manually with a terminal."
+  fi
+else
+  echo "[1a] SKIP: multall-open21.3-original not found"
+fi
+
+# --- Original timer ---
+if [ -f "$BINDIR/multall-open21.3-timer" ]; then
+  echo ""
+  echo "[1b] Running ORIGINAL_TIMER - two-stg..."
+  time $BINDIR/multall-open21.3-timer < $INPUT > run_timer_${TIMESTAMP}.out 2>&1
+  cp stage.log stage.log.aws_timer_${TIMESTAMP}
   echo "  -> Done."
 else
-  echo "  -> WARNING: stage.log not generated. Run original manually with a terminal."
+  echo "[1b] SKIP: multall-open21.3-timer not found"
 fi
+
+# --- OMP 1, 2, 4, 8 threads ---
+for N in 1 2 4 8; do
+  echo ""
+  echo "[1-OMP$N] Running OMP $N thread(s) - two-stg..."
+  time env OMP_NUM_THREADS=$N \
+    $BINDIR/multall-open21.3-s < $INPUT > run_omp${N}_${TIMESTAMP}.out 2>&1
+  cp stage.log stage.log.aws_omp${N}_${TIMESTAMP}
+  echo "  -> Done."
+done
+
+# =============================================================
+# PART 2: steamtest+steam
+# =============================================================
+TESTDIR=$BASEDIR/test_cases/steamtest+steam
+INPUT=steamtest+steam.dat
+
+echo ""
+echo "========================================="
+echo " PART 2: steamtest+steam"
+echo "========================================="
+cd "$TESTDIR"
+
+# --- Original (non-OpenMP) ---
+if [ -f "$BINDIR/multall-open21.3-original" ]; then
+  echo ""
+  echo "[2a] Running ORIGINAL (no OpenMP) - steamtest..."
+  time script -qc "echo Y | $BINDIR/multall-open21.3-original < $INPUT" run_original_${TIMESTAMP}.out > /dev/null 2>&1 || true
+  if [ -f stage.log ]; then
+    cp stage.log stage.log.aws_original_${TIMESTAMP}
+    echo "  -> Done."
+  else
+    echo "  -> WARNING: stage.log not generated."
+  fi
 else
-echo "[1/6] SKIP: multall-open21.3-original not found"
+  echo "[2a] SKIP: multall-open21.3-original not found"
 fi
 
-# --- OMP 1 thread ---
-echo ""
-echo "[2/6] Running OMP 1 thread..."
-time env OMP_NUM_THREADS=1 OMP_PROC_BIND=true OMP_PLACES=cores OMP_WAIT_POLICY=PASSIVE \
-  $BINDIR/multall-open21.3-s < $INPUT > run_omp1.out 2>&1
-cp stage.log stage.log.aws_omp1_${TIMESTAMP}
-echo "  -> Done."
+# --- Original timer ---
+if [ -f "$BINDIR/multall-open21.3-timer" ]; then
+  echo ""
+  echo "[2b] Running ORIGINAL_TIMER - steamtest..."
+  time $BINDIR/multall-open21.3-timer < $INPUT > run_timer_${TIMESTAMP}.out 2>&1
+  cp stage.log stage.log.aws_timer_${TIMESTAMP}
+  echo "  -> Done."
+else
+  echo "[2b] SKIP: multall-open21.3-timer not found"
+fi
 
-# --- OMP 2 threads ---
-echo ""
-echo "[3/6] Running OMP 2 threads..."
-time env OMP_NUM_THREADS=2 OMP_PROC_BIND=true OMP_PLACES=cores OMP_WAIT_POLICY=PASSIVE \
-  $BINDIR/multall-open21.3-s < $INPUT > run_omp2.out 2>&1
-cp stage.log stage.log.aws_omp2_${TIMESTAMP}
-echo "  -> Done."
+# --- OMP 1, 2, 4, 8 threads ---
+for N in 1 2 4 8; do
+  echo ""
+  echo "[2-OMP$N] Running OMP $N thread(s) - steamtest..."
+  time env OMP_NUM_THREADS=$N \
+    $BINDIR/multall-open21.3-s < $INPUT > run_omp${N}_${TIMESTAMP}.out 2>&1
+  cp stage.log stage.log.aws_omp${N}_${TIMESTAMP}
+  echo "  -> Done."
+done
 
-# --- OMP 4 threads ---
-echo ""
-echo "[4/6] Running OMP 4 threads..."
-time env OMP_NUM_THREADS=4 OMP_PROC_BIND=true OMP_PLACES=cores OMP_WAIT_POLICY=PASSIVE \
-  $BINDIR/multall-open21.3-s < $INPUT > run_omp4.out 2>&1
-cp stage.log stage.log.aws_omp4_${TIMESTAMP}
-echo "  -> Done."
-
-# --- OMP 8 threads ---
-echo ""
-echo "[5/6] Running OMP 8 threads..."
-time env OMP_NUM_THREADS=8 OMP_PROC_BIND=true OMP_PLACES=cores OMP_WAIT_POLICY=PASSIVE \
-  $BINDIR/multall-open21.3-s < $INPUT > run_omp8.out 2>&1
-cp stage.log stage.log.aws_omp8_${TIMESTAMP}
-echo "  -> Done."
-
-# --- 結果サマリー ---
+# =============================================================
+# RESULTS SUMMARY
+# =============================================================
 echo ""
 echo "========================================="
 echo " RESULTS SUMMARY"
 echo "========================================="
+
 echo ""
-echo "--- LOOP: TOTAL ---"
-for f in aws_original_${TIMESTAMP} aws_omp1_${TIMESTAMP} aws_omp2_${TIMESTAMP} aws_omp4_${TIMESTAMP} aws_omp8_${TIMESTAMP}; do
-  if [ -f "stage.log.$f" ]; then
-    LOOP=$(grep "LOOP: TOTAL" stage.log.$f | awk '{print $NF}')
-    printf "  %-30s  LOOP: %10s\n" "$f" "$LOOP"
+echo "--- two-stg-LP-ST+steam (100stp) ---"
+echo "LOOP: TOTAL:"
+for f in aws_original aws_timer aws_omp1 aws_omp2 aws_omp4 aws_omp8; do
+  LOG=$BASEDIR/test_cases/two-stg-LP-ST+steam_100stp/stage.log.${f}_${TIMESTAMP}
+  if [ -f "$LOG" ]; then
+    LOOP=$(grep "LOOP: TOTAL" "$LOG" 2>/dev/null | awk '{print $NF}')
+    printf "  %-30s  %10s\n" "$f" "$LOOP"
   fi
 done
 
 echo ""
-echo "--- Section breakdown (OMP=1 vs OMP=8) ---"
+echo "--- steamtest+steam ---"
+echo "LOOP: TOTAL:"
+for f in aws_original aws_timer aws_omp1 aws_omp2 aws_omp4 aws_omp8; do
+  LOG=$BASEDIR/test_cases/steamtest+steam/stage.log.${f}_${TIMESTAMP}
+  if [ -f "$LOG" ]; then
+    LOOP=$(grep "LOOP: TOTAL" "$LOG" 2>/dev/null | awk '{print $NF}')
+    printf "  %-30s  %10s\n" "$f" "$LOOP"
+  fi
+done
+
 echo ""
-echo "  OMP=1:"
-grep -E "^\s+[0-9]+" stage.log.aws_omp1_${TIMESTAMP} | awk '$NF+0 > 0.1 {print "    "$0}'
+echo "--- Numerical Verification (two-stg) ---"
+if [ -f "$BASEDIR/test_cases/two-stg-LP-ST+steam_100stp/run_timer_${TIMESTAMP}.out" ] && \
+   [ -f "$BASEDIR/test_cases/two-stg-LP-ST+steam_100stp/run_omp1_${TIMESTAMP}.out" ]; then
+  bash $SCRIPTSDIR/compare_performance.sh \
+    "$BASEDIR/test_cases/two-stg-LP-ST+steam_100stp/run_timer_${TIMESTAMP}.out" \
+    "$BASEDIR/test_cases/two-stg-LP-ST+steam_100stp/run_omp1_${TIMESTAMP}.out"
+fi
+
 echo ""
-echo "  OMP=8:"
-grep -E "^\s+[0-9]+" stage.log.aws_omp8_${TIMESTAMP} | awk '$NF+0 > 0.1 {print "    "$0}'
+echo "--- Numerical Verification (steamtest) ---"
+if [ -f "$BASEDIR/test_cases/steamtest+steam/run_timer_${TIMESTAMP}.out" ] && \
+   [ -f "$BASEDIR/test_cases/steamtest+steam/run_omp1_${TIMESTAMP}.out" ]; then
+  bash $SCRIPTSDIR/compare_performance.sh \
+    "$BASEDIR/test_cases/steamtest+steam/run_timer_${TIMESTAMP}.out" \
+    "$BASEDIR/test_cases/steamtest+steam/run_omp1_${TIMESTAMP}.out"
+fi
 
 echo ""
 echo "All benchmarks completed at $(date)"

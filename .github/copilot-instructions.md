@@ -164,23 +164,48 @@ C$OMP END PARALLEL DO SIMD
 
 修正後のコードで計算を実行し、結果の正当性を確認する。
 
-- 基本は **OMP=1, 2, 4** で実行する（ユーザの要望に応じて適宜変更）。
+#### 5.1 テストケース
+
+検証は以下の **2 つのテストケース** で行う（メッシュサイズが異なり、ALLOCATABLE 化の効果も確認できる）：
+
+| テストケース | ディレクトリ | 入力ファイル | 特徴 |
+|---|---|---|---|
+| two-stg-LP-ST+steam | `dev/test_cases/two-stg-LP-ST+steam_100stp/` | `two-stg-LP-ST+steam.dat` | 2段タービン, IM=64, 100ステップ |
+| steamtest+steam | `dev/test_cases/steamtest+steam/` | `steamtest+steam.dat` | 蒸気テスト, 小規模メッシュ |
+
+#### 5.2 実行手順
+
+- **ローカル**: original_timer + OMP=1, 2, 4 で実行する。
+- **AWS**: original_timer + OMP=1, 2, 4, 8 で実行する。
+- original_timer のベースラインが未取得の場合は先に実行する。
+
+```bash
+# ビルド
+cd dev/src && make build
+
+# テストケース 1: two-stg (100ステップ)
+cd dev/test_cases/two-stg-LP-ST+steam_100stp
+OMP_NUM_THREADS=N OMP_PROC_BIND=true OMP_PLACES=cores OMP_WAIT_POLICY=PASSIVE \
+  ../../bin/multall-open21.3-s < two-stg-LP-ST+steam.dat > run_YYYYMMDD_HHMM.out
+cp stage.log stage.log.$(date +%Y%m%d_%H%M)
+
+# テストケース 2: steamtest+steam
+cd dev/test_cases/steamtest+steam
+OMP_NUM_THREADS=N OMP_PROC_BIND=true OMP_PLACES=cores OMP_WAIT_POLICY=PASSIVE \
+  ../../bin/multall-open21.3-s < steamtest+steam.dat > run_YYYYMMDD_HHMM.out
+cp stage.log stage.log.$(date +%Y%m%d_%H%M)
+```
+
+#### 5.3 数値検証
+
+以下の2段階で確認する。不一致の場合はステップ 4 に戻る。**両方のテストケースで検証すること。**
+
+1. **収束指標**: OMP=1 の EMAX/EAVG/ECONT/FLOW が変更前と一致すること（last-digit の浮動小数点差のみ許容）。
+2. **全体性能**: stdout ログから全体（WHOLE MACHINE）の圧力比(PR)・等エントロピー効率(eta_TT, eta_TS)・出力(Power)・流量(Flow In/Out) を抽出し、変更前と比較する。相対差 0.001% 未満であること。
+- 比較には `dev/scripts/compare_performance.sh` を使用する：
   ```bash
-  cd dev/src && make build
-  cd dev/test_cases && OMP_NUM_THREADS=N OMP_PROC_BIND=true OMP_PLACES=cores \
-    ../bin/multall-open21.3-s < two-stg-LP-ST+steam.dat > run_YYYYMMDD_HHMM.out
+  bash dev/scripts/compare_performance.sh run_before.out run_after.out
   ```
-- 計算後、`stage.log` を日時付きでリネーム保存する：
-  ```bash
-  cp stage.log stage.log.$(date +%Y%m%d_%H%M)
-  ```
-- **数値検証**: 以下の2段階で確認する。不一致の場合はステップ 4 に戻る。
-  1. **収束指標**: OMP=1 の EMAX/EAVG/ECONT/FLOW が変更前と一致すること（last-digit の浮動小数点差のみ許容）。
-  2. **全体性能**: stdout ログから全体（WHOLE MACHINE）の圧力比(PR)・等エントロピー効率(eta_TT, eta_TS)・出力(Power)・流量(Flow In/Out) を抽出し、変更前と比較する。相対差 0.001% 未満であること。
-  - 比較には `dev/scripts/compare_performance.sh` を使用する：
-    ```bash
-    bash dev/scripts/compare_performance.sh run_before.out run_after.out
-    ```
 
 ### ステップ 6 — 区間別の計算時間比較
 
@@ -217,12 +242,18 @@ C$OMP END PARALLEL DO SIMD
 ## 6. ファイル構成
 
 - メインソース: `dev/src/multall-open21.3-s1.0.f`（開発版）
+- データモジュール: `dev/src/multall_data.f`（ALLOCATABLE 配列定義、旧 COMMON ブロック置換）
 - オリジナル: `dev/src/multall-open-21.3.f`（リファレンス、変更禁止）
-- 共通ブロック定義: `dev/src/commall-open-21.3`
+- 共通ブロック定義: `dev/src/commall-open-21.3`（オリジナル用、参照のみ）
 - ビルド: `dev/src/Makefile`
 - 並列化方針: `dev/docs/OPENMP_PLAN_*.md`（セクションごとの並列化計画）
 - 検証・ユーティリティスクリプト: `dev/scripts/`（検証用スクリプトは必ずここに配置する）
-- テスト入力・出力: `dev/test_cases/`（入力データと `stage.log.*` のみ配置。スクリプトは置かない）
+- テストケース: `dev/test_cases/`（テストケースごとにサブディレクトリ）
+  - `two-stg-LP-ST+steam/` — 2段タービン（フル収束、~7000ステップ）
+  - `two-stg-LP-ST+steam_100stp/` — 同上（100ステップ、クイックベンチマーク用）
+  - `steamtest+steam/` — 蒸気テスト
+  - `hp_steam/` — HP蒸気タービン（フル収束、~5700ステップ）
+  - `hp_steam_500stp/` — 同上（500ステップ）
 - 進捗記録: `dev/docs/DAILY_PROGRESS_YYYY-MM-DD.md`（下記セクション 7 参照）
 
 ---
@@ -279,26 +310,37 @@ vi ~/.ssh/config
 ssh ec2-c7i "sudo apt-get update -qq && sudo apt-get install -y -qq gfortran make"
 
 # 3. ディレクトリ作成
-ssh ec2-c7i "mkdir -p ~/MULTALL-project/dev/{src,bin,test_cases,scripts}"
+ssh ec2-c7i "mkdir -p ~/MULTALL-project/dev/{src,bin,scripts}"
+ssh ec2-c7i "mkdir -p ~/MULTALL-project/dev/test_cases/{two-stg-LP-ST+steam_100stp,steamtest+steam}"
 
-# 4. ファイル転送
+# 4. ソース転送
 cd ~/work/MULTALL-project
-scp dev/src/multall-open21.3-s1.0.f dev/src/multall-open-21.3.f \
+scp dev/src/multall-open21.3-s1.0.f dev/src/multall_data.f \
+    dev/src/multall-open-21.3.f dev/src/multall-open-21.3_timer.f \
     dev/src/commall-open-21.3 dev/src/Makefile \
     ec2-c7i:~/MULTALL-project/dev/src/
 
-scp dev/test_cases/two-stg-LP-ST+steam.dat dev/test_cases/intype \
-    dev/test_cases/mixbconds \
-    ec2-c7i:~/MULTALL-project/dev/test_cases/
+# 5. テストケース転送（two-stg 100stp）
+scp dev/test_cases/two-stg-LP-ST+steam_100stp/two-stg-LP-ST+steam.dat \
+    dev/test_cases/two-stg-LP-ST+steam_100stp/intype \
+    dev/test_cases/two-stg-LP-ST+steam_100stp/mixbconds \
+    dev/test_cases/two-stg-LP-ST+steam_100stp/stopit \
+    dev/test_cases/two-stg-LP-ST+steam_100stp/props_table.dat \
+    ec2-c7i:~/MULTALL-project/dev/test_cases/two-stg-LP-ST+steam_100stp/
 
-scp original/test_cases/props_table.dat original/test_cases/stopit \
-    ec2-c7i:~/MULTALL-project/dev/test_cases/
+# 6. テストケース転送（steamtest+steam）
+scp dev/test_cases/steamtest+steam/steamtest+steam.dat \
+    ec2-c7i:~/MULTALL-project/dev/test_cases/steamtest+steam/
+# steamtest+steam にも共通ファイルが必要な場合は別途転送
 
+# 7. スクリプト転送
 scp dev/scripts/run_100stp_benchmark.sh dev/scripts/diff_stage_logs.sh \
+    dev/scripts/compare_performance.sh \
     ec2-c7i:~/MULTALL-project/dev/scripts/
 
-# 5. コンパイル（OpenMP 版 + オリジナル版）
+# 8. コンパイル（OpenMP 版 + オリジナルタイマー版 + オリジナル版）
 ssh ec2-c7i "cd ~/MULTALL-project/dev/src && make build"
+ssh ec2-c7i "cd ~/MULTALL-project/dev/src && make build_timer"
 ssh ec2-c7i "cd ~/MULTALL-project/dev/src && make build_original"
 ```
 
@@ -312,10 +354,10 @@ original バイナリは `/dev/tty` を開いて Y/N プロンプトを出すた
 ssh ec2-c7i
 
 # ベンチマークスクリプトを実行
-cd ~/MULTALL-project/dev/test_cases
-bash ~/MULTALL-project/dev/scripts/run_100stp_benchmark.sh
+cd ~/MULTALL-project/dev
+bash scripts/run_100stp_benchmark.sh
 # → original の Y/N プロンプトには Y を入力
-# → original, OMP=1, 2, 4, 8 の順に実行される
+# → 各テストケースで original, OMP=1, 2, 4, 8 の順に実行される
 # → 最後に LOOP: TOTAL のサマリーが表示される
 ```
 
@@ -323,11 +365,14 @@ bash ~/MULTALL-project/dev/scripts/run_100stp_benchmark.sh
 
 ```bash
 # ローカルから stage.log を回収
-scp ec2-c7i:~/MULTALL-project/dev/test_cases/stage.log.aws_* \
-    dev/test_cases/
+scp ec2-c7i:~/MULTALL-project/dev/test_cases/two-stg-LP-ST+steam_100stp/stage.log.aws_* \
+    dev/test_cases/two-stg-LP-ST+steam_100stp/
+scp ec2-c7i:~/MULTALL-project/dev/test_cases/steamtest+steam/stage.log.aws_* \
+    dev/test_cases/steamtest+steam/
 
 # LOOP: TOTAL で速度向上量を評価
-grep "LOOP: TOTAL" dev/test_cases/stage.log.aws_*
+grep "LOOP: TOTAL" dev/test_cases/two-stg-LP-ST+steam_100stp/stage.log.aws_*
+grep "LOOP: TOTAL" dev/test_cases/steamtest+steam/stage.log.aws_*
 ```
 
 評価基準:

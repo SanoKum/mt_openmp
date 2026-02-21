@@ -10,9 +10,9 @@
 set -e
 
 HOST=ec2-c7i
-REMOTE_DIR=~/MULTALL-project/dev/test_cases_hp_steam
+REMOTE_DIR=~/MULTALL-project/dev/test_cases/hp_steam
 REMOTE_SCRIPT=~/MULTALL-project/dev/scripts/run_hp_steam_benchmark.sh
-LOCAL_DIR=~/work/MULTALL-project/dev/test_cases_hp_steam/aws_results
+LOCAL_DIR=~/work/MULTALL-project/dev/test_cases/hp_steam/aws_results
 SESSION=hp_bench
 
 ACTION=${1:-run}

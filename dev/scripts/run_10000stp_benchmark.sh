@@ -2,7 +2,7 @@
 # =============================================================
 # 10000ステップ ベンチマーク実行スクリプト
 # AWS c7i (8コア) 用
-# 実行場所: ~/MULTALL-project/dev/test_cases/
+# 実行場所: ~/MULTALL-project/dev/test_cases/two-stg-LP-ST+steam/
 #
 # 注意: 10000ステップは1回あたり約25-80分かかるため、
 #       全5回で合計3-6時間程度を見込むこと。
@@ -10,7 +10,7 @@
 
 set -e
 
-TESTDIR=~/MULTALL-project/dev/test_cases
+TESTDIR=~/MULTALL-project/dev/test_cases/two-stg-LP-ST+steam
 BINDIR=~/MULTALL-project/dev/bin
 INPUT=two-stg-LP-ST+steam-10000stp.dat
 TIMESTAMP=$(date +%Y%m%d_%H%M)
