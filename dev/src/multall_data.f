@@ -511,88 +511,134 @@ C
       SUBROUTINE PRE_READIN_DIMS(ANS_IN,
      &                           IM_REQ,JM_REQ,KM_REQ,NROWS_REQ)
 C
-C     Lightweight pre-read for NEW format only.
-C     Reads stable marker lines to determine IM,KM,NROWS.
-C     JM is estimated from numeric row-control lines (3 integers).
-C     If estimation fails, JM falls back to JD.
+C     Pre-read for NEW format:
+C     Follows the exact READ sequence of NEW_READIN
+C     to extract NROWS, IM, KM.
+C     JM is set to JD (conservative default).
+C     Works for any valid NEW format .dat file because it
+C     tracks stdin position by replicating the read structure,
+C     not by matching header text.
 C
       CHARACTER*1 ANS_IN
       INTEGER IM_REQ,JM_REQ,KM_REQ,NROWS_REQ
-      CHARACTER*256 LINE
-      INTEGER IOS, IOS2, IOS3, IOS4
-      INTEGER I1, I2, I3, I4
-      INTEGER JM_SUM, N_JMROW
-      LOGICAL FOUND_NROWS, FOUND_IMKM
-      LOGICAL FOUND_JM
-
+C
+C     Local variables to consume reads without module side effects
+      CHARACTER*72 SKIP, TITLE_L
+      REAL CP_L, GA_L
+      INTEGER IFGAS_L, ITIMST_L
+      INTEGER IF_RESTART_L, IF_INV_L
+      INTEGER NSTEPS_L, NCHANGE_L
+      REAL CONLIM_L, SFXIN_L, SFTIN_L, FAC4_L
+      REAL CFL_L, DAMP_L, MLIM_L, FPD_L
+C
       IF(ANS_IN.NE.'N'.AND.ANS_IN.NE.'n') THEN
            WRITE(6,*) ' PRE_READIN_DIMS: only NEW format supported.'
            STOP
       END IF
+C
       REWIND(5)
-      FOUND_NROWS = .FALSE.
-      FOUND_IMKM  = .FALSE.
-      FOUND_JM    = .FALSE.
-      JM_SUM      = 0
-      N_JMROW     = 0
-
- 1000 CONTINUE
-      READ(5,'(A)',IOSTAT=IOS) LINE
-      IF(IOS.NE.0) GO TO 2000
-
-      IF((.NOT.FOUND_NROWS).AND.
-     &   INDEX(LINE,'NUMBER OF BLADE ROWS').GT.0) THEN
-           READ(5,'(A)',IOSTAT=IOS) LINE
-           IF(IOS.NE.0) GO TO 9000
-           READ(LINE,*,IOSTAT=IOS2) NROWS_REQ
-           IF(IOS2.NE.0) GO TO 9000
-           FOUND_NROWS = .TRUE.
-           GO TO 1000
+C
+C     ===== (1) TITLE (A72 format, always 1 line) =====
+      READ(5,'(A72)',ERR=9000,END=9000) TITLE_L
+C
+C     ===== (2-4) CP, GA, IFGAS =====
+C     Structure: header + values + next_header
+C     On ERR/END of values read, next_header is skipped.
+C     This matches NEW_READIN lines ~237-241.
+      IFGAS_L = 0
+      CP_L = 1005.0
+      GA_L = 1.4
+      READ(5,*) SKIP
+      READ(5,*,ERR=100,END=100) CP_L, GA_L, IFGAS_L
+      READ(5,*) SKIP
+  100 CONTINUE
+C
+C     ===== Conditional: IFGAS=1 or CP<0 reads gas params =====
+C     Matches NEW_READIN lines ~258-260: READ CP1..RGAS
+      IF(CP_L.LT.0.0.OR.IFGAS_L.EQ.1) THEN
+           READ(5,*,ERR=101) SKIP
+  101      CONTINUE
       END IF
-
-      IF((.NOT.FOUND_IMKM).AND.
-     &   INDEX(LINE,'GRID POINT NUMBERS').GT.0) THEN
-           READ(5,'(A)',IOSTAT=IOS) LINE
-           IF(IOS.NE.0) GO TO 9000
-           READ(LINE,*,IOSTAT=IOS2) IM_REQ,KM_REQ
-           IF(IOS2.NE.0) GO TO 9000
-           FOUND_IMKM = .TRUE.
-           GO TO 1000
+C     IFGAS=3: READ_TABLE reads from file (unit 9), not stdin
+C
+C     ===== (5) ITIMST =====
+C     Matches NEW_READIN lines ~290-292.
+C     No header read here: header was consumed by step (4)
+C     or by a failed values read in step (3).
+      ITIMST_L = 3
+      READ(5,*,ERR=102,END=102) ITIMST_L
+  102 CONTINUE
+C
+C     ===== Conditional: ITIMST sign handling =====
+      IF(ITIMST_L.EQ.-3.OR.ITIMST_L.EQ.-5.OR.
+     &   ITIMST_L.EQ.-6) THEN
+           ITIMST_L = ABS(ITIMST_L)
       END IF
-
-      IF(FOUND_NROWS.AND.FOUND_IMKM.AND.(.NOT.FOUND_JM)) THEN
-           IF(INDEX(LINE,'.').EQ.0) THEN
-                READ(LINE,*,IOSTAT=IOS4) I1,I2,I3,I4
-                IF(IOS4.NE.0) THEN
-                     READ(LINE,*,IOSTAT=IOS3) I1,I2,I3
-                     IF(IOS3.EQ.0) THEN
-                          IF(I1.GE.2.AND.I1.LE.JD.AND.
-     &                       I2.GE.1.AND.I2.LE.I1.AND.
-     &                       I3.GE.1.AND.I3.LE.I1) THEN
-                               JM_SUM  = JM_SUM + I1
-                               N_JMROW = N_JMROW + 1
-                               IF(N_JMROW.EQ.NROWS_REQ)
-     &                              FOUND_JM = .TRUE.
-                          END IF
-                     END IF
-                END IF
-           END IF
+C
+C     ===== Conditional: ITIMST=4/-4 reads extra params =====
+C     Matches NEW_READIN lines ~310-311.
+      IF(ITIMST_L.EQ.4.OR.ITIMST_L.EQ.-4) THEN
+           READ(5,*) SKIP
+           ITIMST_L = 3
       END IF
-
-      GO TO 1000
-
- 2000 CONTINUE
-      IF((.NOT.FOUND_NROWS).OR.(.NOT.FOUND_IMKM)) GO TO 9000
-
-      IF(FOUND_JM) THEN
-           JM_REQ = JM_SUM
-      ELSE
-           JM_REQ = JD
+C
+C     ===== Conditional: ITIMST>=5 reads VSOUND params =====
+C     Matches NEW_READIN lines ~343-347.
+      IF(ITIMST_L.GE.5) THEN
+           READ(5,*,END=103) SKIP
+  103      CONTINUE
       END IF
-
+C
+C     ===== (6-7) CFL, DAMPIN, MACHLIM, F_PDOWN =====
+C     Matches NEW_READIN lines ~385-387.
+      READ(5,*) SKIP
+      READ(5,*,END=104) CFL_L,DAMP_L,MLIM_L,FPD_L
+  104 CONTINUE
+C
+C     ===== (8-10) IF_RESTART, IF_INV =====
+C     Structure: header + values + next_header
+C     On ERR, next_header is skipped (same as CP block).
+C     Matches NEW_READIN lines ~397-403.
+      READ(5,*) SKIP
+      IF_RESTART_L = 0
+      IF_INV_L = 0
+      READ(5,*,ERR=105) IF_RESTART_L, IF_INV_L
+      READ(5,*) SKIP
+  105 CONTINUE
+C
+C     ===== (11) NSTEPS_MAX, CONLIM =====
+C     Matches NEW_READIN lines ~414-416.
+C     No header read: header was consumed by the prior block.
+      NSTEPS_L = 5000
+      CONLIM_L = 0.005
+      READ(5,*,ERR=106) NSTEPS_L, CONLIM_L
+  106 CONTINUE
+C
+C     ===== (12-13) SFXIN, SFTIN, FAC_4TH, NCHANGE =====
+C     Matches NEW_READIN lines ~430-432.
+      READ(5,*) SKIP
+      READ(5,*,ERR=107) SFXIN_L, SFTIN_L, FAC4_L, NCHANGE_L
+  107 CONTINUE
+C
+C     ===== (14-15) NROWS =====
+C     Matches NEW_READIN lines ~443-444.
+      READ(5,*) SKIP
+      READ(5,*,ERR=9000,END=9000) NROWS_REQ
+C
+C     ===== (16-17) IM, KM =====
+C     Matches NEW_READIN lines ~451-452.
+      READ(5,*) SKIP
+      READ(5,*,ERR=9000,END=9000) IM_REQ, KM_REQ
+C
+C     ===== JM: conservative estimate =====
+      JM_REQ = JD
+C
+      WRITE(6,*) ' PRE_READIN_DIMS: NROWS=',NROWS_REQ,
+     &           ' IM=',IM_REQ,' KM=',KM_REQ,' JM(est)=',JM_REQ
+C
       REWIND(5)
       RETURN
-
+C
  9000 CONTINUE
       WRITE(6,*) ' PRE_READIN_DIMS: input pre-read failed.'
       STOP
