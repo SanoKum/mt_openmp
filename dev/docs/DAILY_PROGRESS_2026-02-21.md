@@ -106,12 +106,127 @@ ALLOC_MULTALL_DATA: ID,JD,KD,MAXKI,NROWS = 64 979 64 64 4
 ### 次のアクション
 
 #### 優先度 高
-1. **AWS ベンチマーク**: ALLOCATABLE 版で two-stg + HP Steam の計測。特に HP Steam（IM=37 vs 旧 ID=128）でのキャッシュ効率改善効果を確認
-2. **git commit & push**: ALLOCATABLE 化の全変更をコミット
+1. **COMMON 版で OMP=1,2,4 ベンチマーク**: two-stg + steamtest 両方でスケーリング計測
+2. **COMMON 版のメモリ効率改善検討**: `commall-open-21.3` の PARAMETER 値チューニング
 
 #### 優先度 中
-3. **SMOOTH_VAR STREAMWISE/RESET D**: スケーリング改善（3.6-3.9x → 目標 5x+）
+3. **SMOOTH_VAR STREAMWISE/RESET D**: スケーリング改善
 4. **STEP/DAMP COLLAPSE(2)**: DAMP feedback に影響しない DO 1502 部分
 
-#### 優先度 低
-5. **K-only ループの COLLAPSE(2)**: trip 数増加による負荷分散改善
+---
+
+## ALLOCATABLE 版の性能問題発見と COMMON 版への revert
+
+### 問題: PRESSURE/TEMP が OMP=1 で異常に遅い
+
+ベンチマーク中に、ALLOCATABLE 版の OMP=1 で PRESSURE/TEMP が original_timer 比 **+44%** も遅いことが判明。
+
+| テストケース | original_timer | ALLOCATABLE OMP=1 | 増加率 |
+|---|---:|---:|---|
+| two-stg 100stp | 7.90s | 10.74s | +36% |
+| steamtest 5000stp | 29.24s | 42.12s | +44% |
+
+### steamtest+steam テストケースの整備
+
+steamtest+steam を初めて動作確認する際に以下の問題を修正:
+- `intype` が空ファイル → `N`（NEW 形式）に設定
+- `props_table.dat` が存在しなかった → two-stg から複写（両方 IFGAS=3, 蒸気テーブル）
+- `PRE_READIN_DIMS` がパターンマッチングで失敗 → NEW_READIN の READ 構造をそのまま追跡する方式に完全書き直し
+
+### steamtest+steam ベンチマーク（ALLOCATABLE版）
+
+| | original_timer | OMP=1 | OMP=2 | OMP=4 |
+|---|---:|---:|---:|---:|
+| LOOP: TOTAL | 174.26s | 154.26s | 111.17s | 97.80s |
+| PRESSURE/TEMP | 29.24s | 42.12s | 23.40s | 14.31s |
+| 対 original | — | 1.13x | 1.57x | 1.78x |
+
+数値検証: step 2686 で収束、EAVG=0.0002, ECONT=0.0059, FLOW=19.8477 完全一致 ✅
+
+### MOMENTUM FLUX: PARALLEL DO vs SINGLE の分析
+
+steamtest (IM=46) ではメッシュが小さく、MOMENTUM FLUX の PARALLEL DO 部分がスケールせず SINGLE 部分（fork/join オーバーヘッド）が増加:
+
+| 部分 | OMP=1 | OMP=2 | OMP=4 |
+|---|---:|---:|---:|
+| PARALLEL DO 合計 | 15.56s | 14.22s | 13.99s |
+| SINGLE 合計 | 0.66s | 1.11s | 1.78s |
+| 合計 | 16.23s | 15.34s | 15.77s |
+
+OMP=2→4 で合計が逆に悪化。並列粒度不足。
+
+### 原因分析: ALLOCATABLE ディスクリプタの間接参照コスト
+
+IFGAS=3（蒸気テーブル）の場合、PRESSURE/TEMP ループ内で毎格子点 `CALL TABSEARCH` が呼ばれる。TABSEARCH は `USE MULTALL_DATA` 経由で 15個の2Dテーブル配列（`P_TAB`, `T_TAB`, `ENT_TAB`, `GA_PV_TAB`, `DRY_TAB` + 各 `_HDI/_HDJ` ）にアクセス。
+
+- **ALLOCATABLE**: ディスクリプタ（ポインタ + サイズ情報）経由の間接参照 × 15配列 × 全格子点 × 全ステップ
+- **COMMON**: 固定アドレス → コンパイラが直接アクセスコード生成
+
+### `-flto` (Link Time Optimization) の検証
+
+`-flto` でインライン展開によるディスクリプタ参照のホイストを試みたが効果不十分:
+
+| テストケース | セクション | No LTO | With LTO | 改善 |
+|---|---|---:|---:|---|
+| two-stg 100stp | PRESSURE/TEMP | 10.74s | 10.34s | -3.7% |
+| two-stg 100stp | LOOP: TOTAL | 44.03s | 46.57s | **+5.8% 悪化** |
+| steamtest | PRESSURE/TEMP | 42.12s | 38.97s | -7.5% |
+
+two-stg で LOOP: TOTAL が悪化 → `-flto` は revert。
+
+### COMMON 版との A/B 比較
+
+`998c77e`（ALLOCATABLE 化前の最終コミット）のソースを取り出し、`commall-open-21.3`（ID=64, JD=2500, MAXKI=82）で別バイナリをビルド。
+
+#### two-stg 100stp OMP=1
+
+| セクション | ALLOCATABLE | COMMON | 差 |
+|---|---:|---:|---|
+| **LOOP: TOTAL** | **44.03s** | **39.49s** | **-10.3%** |
+| **PRESSURE/TEMP** | **10.74s** | **5.54s** | **-48.4%** |
+| VISCOUS/TURB | 3.50s | 3.21s | -8.3% |
+| CELL->NODE | 2.61s | 2.27s | -13.0% |
+| MG AGG | 2.37s | 2.13s | -10.1% |
+| SMOOTH_VAR | 6.88s | 8.54s | +24.1% (COMMON が遅い) |
+| TSTEP: DENSITY | 3.71s | 3.87s | +4.3% |
+
+#### steamtest 5000stp OMP=1
+
+| セクション | ALLOCATABLE | COMMON | 差 |
+|---|---:|---:|---|
+| **LOOP: TOTAL** | **154.26s** | **152.22s** | **-1.3%** |
+| **PRESSURE/TEMP** | **42.12s** | **21.53s** | **-48.9%** |
+
+### 判断: COMMON 版を正とする
+
+- PRESSURE/TEMP は COMMON で約半分（ALLOCATABLE の間接参照コスト確認）
+- LOOP: TOTAL は two-stg で -10%、steamtest で -1.3%
+- SMOOTH_VAR は COMMON で 24% 遅い箇所もあるが、PRESSURE/TEMP の改善が支配的
+- **コミット 87c2f34**: COMMON 版を `multall-open21.3-s1.0.f` として正、ALLOCATABLE 版は `-alloc.f` としてバックアップ保持
+
+### 教訓
+
+1. **ALLOCATABLE はパフォーマンスコストがある**: 特に頻繁に呼ばれるサブルーチン内で MODULE 変数を多数参照する場合、ディスクリプタ間接参照のオーバーヘッドが蓄積
+2. **TABSEARCH が最も影響を受けた**: 15個テーブル配列 × 全格子点 × 全ステップ
+3. **COMMON の固定長配列はメモリ浪費だが高速**: コンパイル時アドレス確定 → 直接アクセスコード生成
+4. **`-flto` は万能ではない**: gfortran では効果限定的で副作用あり
+
+---
+
+### 現在の速度向上状況
+
+#### ローカル (i5-12400F 6C/12T, two-stg 100ステップ, COMMON版)
+
+| | original_timer | COMMON OMP=1 |
+|---|---:|---:|
+| LOOP: TOTAL | 44.26s | 39.49s |
+| 対 original | — | 1.12x |
+
+※ OMP=2,4 は COMMON 版で未計測（次セッションで実施予定）
+
+#### ローカル (i5-12400F 6C/12T, steamtest 5000ステップ, ALLOCATABLE版)
+
+| | original_timer | OMP=1 | OMP=2 | OMP=4 |
+|---|---:|---:|---:|---:|
+| LOOP: TOTAL | 174.26s | 154.26s | 111.17s | 97.80s |
+| 対 original | — | 1.13x | 1.57x | 1.78x |
