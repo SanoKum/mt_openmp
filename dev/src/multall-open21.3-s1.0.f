@@ -7157,29 +7157,26 @@ C
       IF(DAMP.GE.2.0.AND.DAMP.LE.100) THEN
 C
 C     CALCULATE THE AVERAGE CHANGES FOR EACH ROW,  AVG_CHG(NR).
+C     Serial execution: REDUCTION overhead exceeds parallel gain
+C     for small meshes (K<64). Barriers per NROWS iteration were
+C     causing OMP=4->8 regression on steamtest.
 C
-      DO 1501 NR = 1,NROWS
 C$OMP SINGLE
+      DO 1501 NR = 1,NROWS
       SUMCHG = 0.0
       JST = JSTART(NR) + 1
       JEN = JMIX(NR)   - 1
       JCHANGE = JEN - JST  + 1
       NSUM = IMM1*KMM1*JCHANGE
-C$OMP END SINGLE
-C$OMP DO REDUCTION(+:SUMCHG) SCHEDULE(STATIC)
       DO 1502 K=1,KMM1
       DO 1502 J = JST, JEN
       DO 1502 I=1,IMM1
       SUMCHG = SUMCHG + ABS(STORE(I,J,K))
  1502 CONTINUE
-C$OMP END DO
-C$OMP SINGLE
       AVG_CHG(NR) = SUMCHG/NSUM
-C$OMP END SINGLE
  1501 CONTINUE
 C
 C     SMOOTH THE BLADE ROW CHANGES
-C$OMP SINGLE
       IF(NROWS.EQ.1) AVG_BLK(1) = AVG_CHG(1)
       IF(NROWS.EQ.2) THEN
             AVG_BLK(2) = 0.5*(AVG_CHG(1) + AVG_CHG(2))
