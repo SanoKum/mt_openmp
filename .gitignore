@@ -6,7 +6,8 @@
 
 # Built binaries
 /original/bin/
-/dev/bin/
+/dev/bin/*
+!/dev/bin/.gitkeep
 *.x
 
 # Build artifacts
